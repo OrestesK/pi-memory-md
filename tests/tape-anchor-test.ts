@@ -79,6 +79,17 @@ test("AnchorStore skips malformed and incomplete JSONL lines during load", () =>
   assert.equal(anchors[0]?.id, "fallback-id-source");
   assert.equal(anchors[1]?.id, "entry-10:2026-04-23T12:30:00.000Z:task/fallback-id");
 });
+test("AnchorStore supports thread anchor type filtering", () => {
+  const { store } = createStore();
+  store.append(createAnchor({ id: "thread-1", name: "thread/demo", type: "thread" }));
+  store.append(createAnchor({ id: "handoff-1", name: "task/demo", type: "handoff" }));
+
+  assert.deepEqual(
+    store.search({ type: "thread" }).map((anchor) => anchor.id),
+    ["thread-1"],
+  );
+});
+
 test("AnchorStore search combines filters for session, range, name, meta, and keywords", () => {
   const { store } = createStore();
   const anchors = [

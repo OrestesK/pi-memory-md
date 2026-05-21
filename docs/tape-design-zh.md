@@ -85,7 +85,7 @@ interface TapeAnchor {
   id: string;             // 稳定的锚点 ID
   timestamp: string;      // ISO 时间戳
   name: string;           // 锚点名称（如 "session/new", "session/resume", "task/begin"）
-  type: "session" | "handoff";
+  type: "session" | "handoff" | "thread";
   meta?: {
     trigger?: "direct" | "keyword" | "manual";
     keywords?: string[];
@@ -114,7 +114,7 @@ interface TapeAnchor {
 ```typescript
 class TapeService {
   // 锚点操作
-  createAnchor(name: string, type: "session" | "handoff", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
+  createAnchor(name: string, type: "session" | "handoff" | "thread", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
   recordSessionStart(reason?: "startup" | "reload" | "new" | "resume" | "fork"): TapeAnchor
   deleteAnchor(id: string): TapeAnchor | null
   findAnchorByName(name: string, anchorScope?: "session" | "project"): TapeAnchor | null
@@ -280,7 +280,7 @@ tape_search({
   anchorScope?: "session" | "project",
   scan?: string,                            // 搜索 entry/anchor 内容
   anchorName?: string,                      // 锚点名称子串
-  anchorType?: "session" | "handoff",
+  anchorType?: "session" | "handoff" | "thread",
   anchorSummary?: string,
   anchorPurpose?: string,
   anchorKeywords?: string[]                 // 必须全部存在

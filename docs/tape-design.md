@@ -85,7 +85,7 @@ interface TapeAnchor {
   id: string;             // Stable anchor id
   timestamp: string;      // ISO timestamp
   name: string;           // Anchor name (e.g., "session/new", "session/resume", "task/begin")
-  type: "session" | "handoff";
+  type: "session" | "handoff" | "thread";
   meta?: {
     trigger?: "direct" | "keyword" | "manual";
     keywords?: string[];
@@ -114,7 +114,7 @@ Main service combining session reading and anchor management:
 ```typescript
 class TapeService {
   // Anchor operations
-  createAnchor(name: string, type: "session" | "handoff", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
+  createAnchor(name: string, type: "session" | "handoff" | "thread", meta?: TapeAnchor["meta"], syncTreeLabel?: boolean): TapeAnchor
   recordSessionStart(reason?: "startup" | "reload" | "new" | "resume" | "fork"): TapeAnchor
   deleteAnchor(id: string): TapeAnchor | null
   findAnchorByName(name: string, anchorScope?: "session" | "project"): TapeAnchor | null
@@ -280,7 +280,7 @@ tape_search({
   anchorScope?: "session" | "project",
   scan?: string,                            // Text search in entry/anchor content
   anchorName?: string,                      // Anchor name substring
-  anchorType?: "session" | "handoff",
+  anchorType?: "session" | "handoff" | "thread",
   anchorSummary?: string,
   anchorPurpose?: string,
   anchorKeywords?: string[]                 // All keywords must be present

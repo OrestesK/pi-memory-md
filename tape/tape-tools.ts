@@ -571,7 +571,9 @@ export function registerTapeSearch(pi: ExtensionAPI, getTapeService: TapeService
       ),
       scan: Type.Optional(Type.String({ description: "Text search in entry/anchor content" })),
       anchorName: Type.Optional(Type.String({ description: "Filter anchors by name substring" })),
-      anchorType: Type.Optional(Type.String({ description: "Filter anchors by exact type, e.g. 'handoff'" })),
+      anchorType: Type.Optional(
+        Type.String({ description: "Filter anchors by exact type, e.g. 'handoff' or 'thread'" }),
+      ),
       anchorSummary: Type.Optional(Type.String({ description: "Filter anchors by summary substring" })),
       anchorPurpose: Type.Optional(Type.String({ description: "Filter anchors by purpose substring" })),
       anchorKeywords: Type.Optional(

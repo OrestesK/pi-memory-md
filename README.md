@@ -359,7 +359,7 @@ Each line in the tape anchor store is a JSON record:
 Each anchor has:
 - **`id`**: A stable unique identifier, auto-generated from `sessionEntryId:timestamp:name`
 - **`name`**: A human-readable label (e.g., `session/new`, `task/begin`)
-- **`type`**: Anchor type - `session` for lifecycle anchors, `handoff` for manual/semantic transitions
+- **`type`**: Anchor type - `session` for lifecycle anchors, `handoff` for manual/semantic transitions, `thread` for TapeThread checkpoints
 - **`sessionId`**: The pi session this anchor belongs to
 - **`sessionEntryId`**: The associated session entry ID for tree mirroring
 - **`timestamp`**: ISO timestamp of when the anchor was created
@@ -379,7 +379,7 @@ Instead of asking the LLM to infer the user's intent from vague semantic signals
 
 Keywords make this intent-recording process more practical. When a configured keyword matches, keyword detection sends a hidden message that asks the agent to consider creating a keyword anchor, and the agent can still refuse when the anchor would not be useful. Anchor names are also mirrored into pi `/tree` labels for the session nodes they attach to, with stale labels cleaned up before resync.
 
-Lifecycle anchors (`session/*`) are created automatically, while handoff anchors can be created manually via `/memory-anchor`. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked while keyword detection and `/memory-anchor` still work, so the agent will not create anchors on its own.
+Lifecycle anchors (`session/*`) are created automatically, handoff anchors can be created manually via `/memory-anchor`, and thread anchors are created via `/memory-thread`. When `mode: "manual"` is set, direct `tape_handoff` calls are blocked while keyword detection and `/memory-anchor` still work, so the agent will not create handoff anchors on its own.
 
 The combination of anchors and keywords closes the loop: intent -> memory data -> intent, while keeping automation under user control.
 

@@ -4,7 +4,7 @@ import { toTimestamp } from "../utils.js";
 
 const MAX_MEMORY_ANCHORS = 100;
 
-export type TapeAnchorType = "session" | "handoff";
+export type TapeAnchorType = "session" | "handoff" | "thread";
 
 export type TapeAnchorMeta = {
   trigger?: "direct" | "keyword" | "manual";
@@ -34,7 +34,7 @@ export interface TapeAnchorScanOptions {
   scan?: string;
   since?: string;
   until?: string;
-  type?: "session" | "handoff";
+  type?: TapeAnchorType;
   summary?: string;
   purpose?: string;
   keywords?: string[];

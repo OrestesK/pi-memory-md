@@ -473,6 +473,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
         registerAllTapeThreadTools(
           pi,
           () => state.activeTapeRuntime?.service ?? null,
+          () => settings,
           () => state.pendingThreadTrigger,
         );
       }

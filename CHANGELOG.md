@@ -43,7 +43,7 @@ When tape-mode is on, `sessionBridge` also scans handoff anchors and builds a se
 
 ## New Features
 
-- Added TapeThread, a tape-backed intent thread layer for managing long-running work with root nodes, named branches, checkout, compact resume context, and optional `tape.thread: false` disablement. See [TapeThread Design](docs/tape-thread-design.md).
+- Added TapeThread, a tape-backed intent thread layer with dedicated `thread` anchors for managing long-running work with root nodes, named branches, checkout, compact resume context, and optional `tape.thread: false` disablement. See [TapeThread Design](docs/tape-thread-design.md).
   Inspired by: [Getting the most out of Codex](https://x.com/jxnlco/status/2057153744630890620)
 - Added `hooks.beforeAgentStart: ["sessionBridge"]`, an opt-in bridge for closely related `new`/`resume`/`fork` sessions. It indexes recent previous session messages, plus handoff anchors when tape is active, and sends only prompt-relevant matches to the next agent turn. In `message-append` delivery it joins the startup memory message; in `system-prompt` delivery it is sent as a hidden bridge message.
 - Added BM25-based ranking for memory retrieval via `@orama/orama`, with Chinese tokenization via `nodejieba`. `memory_search(query)` now uses BM25 ranking by default to prioritize relevant memory files by title/tags/description/content, and tape smart-mode delivery uses the first prompt plus recent anchor summary/purpose/keywords to rank candidate files. Chinese and mixed-language query/index text is segmented before ranking, improving fuzzy-topic recall and reducing noisy top results from pure keyword/recency ordering.

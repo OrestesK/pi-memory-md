@@ -47,13 +47,13 @@ TapeThreadNode = why that checkpoint matters
 TapeThread = where this work line currently points
 ```
 
-Existing anchor types stay unchanged:
+TapeThread uses a dedicated anchor type:
 
 ```ts
-type TapeAnchorType = "session" | "handoff";
+type TapeAnchorType = "session" | "handoff" | "thread";
 ```
 
-A TapeThreadNode is backed by an existing anchor. The node `id` is the anchor id.
+A TapeThreadNode is backed by an existing `thread` anchor. The node `id` is the anchor id.
 
 Thread anchors should use readable names:
 
@@ -178,7 +178,7 @@ Creates a new tape thread.
 Flow:
 
 ```txt
-create tape handoff anchor named thread/{threadName}
+create tape thread anchor named thread/{threadName}
 create TapeThread(anchorId = anchor.id, rootNodeIds = [])
 set active thread
 ```
@@ -219,7 +219,7 @@ Create flow:
 
 ```txt
 user prompt with clear create/start intent
-create tape handoff anchor named thread/{threadName}
+create tape thread anchor named thread/{threadName}
 create TapeThread(anchorId = anchor.id, rootNodeIds = [])
 set active thread
 ```
@@ -242,7 +242,7 @@ Flow:
 
 ```txt
 current thread
-create tape handoff anchor named thread/{threadName}-{HHMMSS}-[root-node]
+create tape thread anchor named thread/{threadName}-{HHMMSS}-[root-node]
 create root TapeThreadNode(id = anchor.id, parentNodeId = undefined, branchPath = [summary])
 append node id to thread.rootNodeIds
 update thread HEAD
@@ -256,7 +256,7 @@ Flow:
 
 ```txt
 current HEAD
-create tape handoff anchor named thread/{threadName}-{branchName}-{HHMMSS}-[node]
+create tape thread anchor named thread/{threadName}-{branchName}-{HHMMSS}-[node]
 create TapeThreadNode(id = anchor.id, parentNodeId = HEAD, parentSummary = HEAD.summary, branchName, branchPath)
 update thread HEAD
 ```
@@ -328,7 +328,7 @@ Update a TapeThread only when there is clear evidence:
 
 - user explicitly switches or resumes a thread
 - user creates a branch/checkpoint
-- a tape handoff marks an important transition
+- a tape anchor marks an important transition
 - edited/read files clearly match an active thread
 
 Avoid updating when relevance is ambiguous.
