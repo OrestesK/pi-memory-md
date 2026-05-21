@@ -9,6 +9,7 @@ import {
   type TapeAnchorType,
 } from "./tape-anchor.js";
 import { getEntriesAfterTimestamp, getSessionFilePath, getSessionFilePaths, parseSessionFile } from "./tape-reader.js";
+import { TapeThreadStore } from "./tape-thread.js";
 import type { TapeSessionScanOptions } from "./tape-types.js";
 
 const DEFAULT_ANCHOR_LABEL_PREFIX = "⚓ ";
@@ -85,6 +86,7 @@ function mergeAnchorLabel(labelPrefix: string, existingLabel: string | undefined
 
 export class TapeService {
   private readonly anchorStore: AnchorStore;
+  private readonly threadStore: TapeThreadStore;
   private readonly sessionId: string;
   private readonly cwd: string;
   private sessionManager: TapeSessionManager | null = null;
@@ -97,6 +99,7 @@ export class TapeService {
     this.sessionId = sessionId;
     this.cwd = cwd;
     this.anchorStore = new AnchorStore(tapeBasePath, projectName);
+    this.threadStore = new TapeThreadStore(tapeBasePath, projectName);
   }
 
   static create(tapeBasePath: string, projectName: string, sessionId: string, cwd: string): TapeService {
@@ -437,6 +440,10 @@ export class TapeService {
     return this.anchorStore;
   }
 
+  getThreadStore(): TapeThreadStore {
+    return this.threadStore;
+  }
+
   getAlwaysInclude(): string[] {
     return [];
   }
@@ -475,6 +482,7 @@ export class TapeService {
   clear(): void {
     this.clearAnchorTreeLabels();
     this.anchorStore.clear();
+    this.threadStore.clear();
     this.entryCache.clear();
   }
 }

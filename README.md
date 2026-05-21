@@ -221,6 +221,7 @@ More trigger actions will be added later, even custom hooks.
 | `hooks.sessionEnd` | `[]` | Actions to run when a session ends |
 | `hooks.beforeAgentStart` | `[]` | Actions to run before the agent starts; `sessionBridge` bridges relevant context from recent `new`/`resume`/`fork` previous sessions |
 | `tape.enabled` | `false` | Enable tape mode for dynamic context selection |
+| `tape.thread` | `true` | Enable TapeThread tools and `/memory-thread` when tape mode is enabled |
 
 When settings change, run `/reload` to apply them.
 
@@ -417,6 +418,9 @@ The panel only helps you land on the right anchor. After jumping there, any deep
       "excludeDirs": [
         "/absolute/path/to/sandbox"
       ],
+
+      // TapeThread tools and /memory-thread (default: true)
+      // "thread": false,
 
       "context": {
         // "smart": ranks memory files plus recent project file activity from session history (default)

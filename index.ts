@@ -34,6 +34,7 @@ import {
 } from "./tape/tape-gate.js";
 import { DEFAULT_MEMORY_REVIEW_LIMIT, normalizeMemoryReviewLimit, openMemoryReview } from "./tape/tape-review.js";
 import { TapeService } from "./tape/tape-service.js";
+import { registerAllTapeThreadTools } from "./tape/tape-thread-tools.js";
 import type { PendingHandoffMatch } from "./tape/tape-tools.js";
 import { registerAllTapeTools } from "./tape/tape-tools.js";
 import { registerAllMemoryTools } from "./tools.js";
@@ -52,6 +53,7 @@ type ExtensionState = {
   initialTapeContext: InitialContextState;
   hasDeliveredInitialContext: boolean;
   pendingHandoffMatch: PendingHandoffMatch | null;
+  pendingThreadTrigger: "manual" | null;
   tapeGate: TapeGateResult | null;
   activeTapeRuntime: {
     service: TapeService;
@@ -74,6 +76,7 @@ function createExtensionState(): ExtensionState {
     initialTapeContext: { status: "pending" },
     hasDeliveredInitialContext: false,
     pendingHandoffMatch: null,
+    pendingThreadTrigger: null,
     tapeGate: null,
     activeTapeRuntime: null,
     sessionBridge: { delivered: false },
@@ -279,6 +282,10 @@ function handleTapeBeforeAgentStart(
     state.pendingHandoffMatch = keywordHandoff ? { trigger: "keyword", instruction: keywordHandoff } : null;
   }
 
+  if (state.pendingThreadTrigger === "manual" && !event.prompt.includes("/memory-thread")) {
+    state.pendingThreadTrigger = null;
+  }
+
   if (keywordHandoff) {
     ctx.ui.notify(`Tape keyword detected: ${keywordHandoff.primary}`, "info");
   }
@@ -462,6 +469,13 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
           return handoffMatch;
         },
       );
+      if (settings.tape?.enabled === true && settings.tape.thread !== false) {
+        registerAllTapeThreadTools(
+          pi,
+          () => state.activeTapeRuntime?.service ?? null,
+          () => state.pendingThreadTrigger,
+        );
+      }
       state.tapeToolsRegistered = true;
     }
 
@@ -500,6 +514,19 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
 }
 
 // User-facing slash commands for memory and tape operations.
+function buildMemoryThreadMessage(prompt: string): string {
+  return [
+    "The user explicitly requested TapeThread management via /memory-thread.",
+    "",
+    "Interpret the user's prompt naturally and use the tape_thread_* tools when the action is clear.",
+    "Available actions include create, branch, checkout, status, search/list/show, update, resume, and archive.",
+    "If checkout target is described by name rather than node id, search first and then checkout the matching node.",
+    "If the prompt is only an intent/topic without a clear management action, ask whether to create a related thread and do not call tools yet.",
+    "",
+    `User prompt: ${prompt}`,
+  ].join("\n");
+}
+
 function buildManualAnchorMessage(prompt: string): string {
   return [
     "The user explicitly requested a manual tape anchor via /memory-anchor.",
@@ -638,6 +665,37 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
         await openMemoryReview(tapeService, ctx, { limit });
       },
     });
+
+    if (settings.tape.thread !== false) {
+      pi.registerCommand("memory-thread", {
+        description: "Manage TapeThread intent lines with natural language",
+        handler: async (args, ctx) => {
+          const prompt = args.trim();
+          if (!prompt) {
+            ctx.ui.notify("Usage: /memory-thread <prompt>", "warning");
+            return;
+          }
+
+          ensureTapeRuntime(settings, state, ctx, { recordSessionStart: false });
+          const tapeService = state.activeTapeRuntime?.service;
+          if (!tapeService) {
+            ctx.ui.notify("Tape runtime is unavailable.", "error");
+            return;
+          }
+
+          state.pendingThreadTrigger = "manual";
+
+          pi.sendMessage(
+            {
+              customType: "pi-memory-md-thread",
+              content: buildMemoryThreadMessage(prompt),
+              display: false,
+            },
+            { triggerTurn: true },
+          );
+        },
+      });
+    }
 
     pi.registerCommand("memory-anchor", {
       description: "Ask the LLM to create a manual tape anchor from your prompt",

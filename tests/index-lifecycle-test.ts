@@ -89,6 +89,32 @@ test("memory-anchor command is only registered when tape is enabled", () => {
   assert.equal(enabled.registeredCommands.includes("memory-anchor"), true);
 });
 
+test("TapeThread can be disabled while tape stays enabled", async () => {
+  const homeDir = createTempDir("pi-memory-md-index-home-thread-disabled");
+  const projectDir = createTempDir("pi-memory-md-index-project-thread-disabled");
+
+  writeJson(path.join(homeDir, ".pi", "agent", "settings.json"), {
+    "pi-memory-md": { tape: { enabled: true, thread: false } },
+  });
+
+  const harness = bootExtension(homeDir, projectDir);
+  const sessionStart = harness.handlers.get("session_start");
+  assert.ok(sessionStart);
+
+  await sessionStart?.(
+    { reason: "new" },
+    { cwd: projectDir, ui: createUi(), sessionManager: createSessionManager([], "entry-1") },
+  );
+
+  assert.equal(harness.registeredCommands.includes("memory-anchor"), true);
+  assert.equal(harness.registeredCommands.includes("memory-thread"), false);
+  assert.equal(harness.registeredTools.includes("tape_handoff"), true);
+  assert.equal(
+    harness.registeredTools.some((name) => name.startsWith("tape_thread_")),
+    false,
+  );
+});
+
 test("session_start registers tape tools only once and skips start hooks for replaced sessions", async () => {
   const homeDir = createTempDir("pi-memory-md-lifecycle-home-1");
   const projectDir = createTempDir("pi-memory-md-lifecycle-project-1");

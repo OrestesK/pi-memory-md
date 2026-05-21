@@ -6,7 +6,7 @@ import matter from "gray-matter";
 import { DEFAULT_HOOKS, normalizeHooks } from "./hooks.js";
 import { normalizeTapeKeywords } from "./tape/tape-gate.js";
 import type { MemoryFile, MemoryFrontmatter, MemoryMdSettings, MemoryMeta, ParsedFrontmatter } from "./types.js";
-import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, expandHomePath, getProjectMeta } from "./utils.js";
+import { DEFAULT_LOCAL_PATH, DEFAULT_TAPE_EXCLUDE_DIRS, escapeXml, expandHomePath, getProjectMeta } from "./utils.js";
 
 export * from "./types.js";
 export { DEFAULT_LOCAL_PATH, getCurrentDate } from "./utils.js";
@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS: MemoryMdSettings = {
   },
   tape: {
     enabled: false,
+    thread: true,
     onlyGit: true,
     excludeDirs: DEFAULT_TAPE_EXCLUDE_DIRS,
     context: {
@@ -171,6 +172,7 @@ function normalizeSettings(
   }
 
   if (loadedSettings.tape) {
+    loadedSettings.tape.thread = loadedSettings.tape.thread !== false;
     loadedSettings.tape.onlyGit = loadedSettings.tape.onlyGit !== false;
     loadedSettings.tape.excludeDirs = normalizeAbsolutePathList([
       ...(DEFAULT_TAPE_EXCLUDE_DIRS ?? []),
@@ -554,7 +556,7 @@ async function buildMemoryContextSection(scope: MemoryContextScope): Promise<str
   if (!scannedFiles) return null;
 
   const source = scope.label === "Shared Global Memory" ? "global" : "project";
-  const lines: string[] = [`<memory_files source="${source}" directory="${scope.memoryDir}">`];
+  const lines: string[] = [`<memory_files source="${source}" directory="${escapeXml(scope.memoryDir)}">`];
   const entries = scannedFiles.files
     .map((filePath, index) => ({ path: filePath, memory: scannedFiles.memories[index] }))
     .filter((entry): entry is { path: string; memory: MemoryFile } => Boolean(entry.memory));

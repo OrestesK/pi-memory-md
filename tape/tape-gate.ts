@@ -2,7 +2,7 @@ import path from "node:path";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type PreparedBm25Docs, prepareBm25Docs, searchPreparedBm25Docs } from "../bm25.js";
 import type { MemoryMdSettings, ProjectMeta } from "../types.js";
-import { formatTimeSuffix, getProjectMeta, isPathInside, toTimestamp } from "../utils.js";
+import { escapeXml, formatTimeSuffix, getProjectMeta, isPathInside, toTimestamp } from "../utils.js";
 import type { TapeAnchor } from "./tape-anchor.js";
 import { DEFAULT_FORMATTED_ENTRY_CONTENT_CHARS, extractMessageContent, formatEntryLine } from "./tape-context.js";
 import { parseSessionFile } from "./tape-reader.js";
@@ -275,15 +275,6 @@ function isBridgeMessageEntry(
   if (entry.type !== "message") return false;
   if (entry.message.role !== "user" && entry.message.role !== "assistant") return false;
   return extractMessageContent(entry.message.content).trim().length > 0;
-}
-
-function escapeXml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
 }
 
 function renderBridgeXml(sections: Array<{ tag: string; lines: string[] }>, maxChars: number): string | null {

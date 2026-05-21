@@ -26,6 +26,15 @@ export function toTimestamp(value: string): number {
   return new Date(value).getTime();
 }
 
+export function escapeXml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
 export function hoursAgoIso(hours: number): string {
   return nowIso(new Date(Date.now() - hours * 60 * 60 * 1000));
 }

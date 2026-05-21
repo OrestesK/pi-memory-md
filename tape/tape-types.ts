@@ -72,6 +72,8 @@ export type TapeHandoffMode = "auto" | "manual";
 export interface TapeConfig {
   /** Enable tape mode. If the tape block exists, tape is on unless this is false. */
   enabled?: boolean;
+  /** Enable TapeThread tools and /memory-thread when tape mode is enabled (default: true) */
+  thread?: boolean;
   /** Run tape only inside a Git repository by default; otherwise skip tape delivery and anchors (default: true) */
   onlyGit?: boolean;
   /** Absolute directory paths where tape is always disabled */
