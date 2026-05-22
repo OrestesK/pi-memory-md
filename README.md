@@ -387,6 +387,35 @@ The combination of anchors and keywords closes the loop: intent -> memory data -
 
 Prompts should evolve into intent.
 
+### Tape Thread
+
+Tape Thread is a lightweight memory-thread layer built on top of tape anchors. It turns long-running work into a small tree of resumable checkpoints: a thread has one or more root nodes, branches can split from the current HEAD, and each node can keep its summary, decisions, next steps, relevant files, and memory links.
+
+`thread -> root node -> branch -> node`, each `thread-anchor` is a node, and linking them together forms a thread. A thread represents a specific topic or task the user is working on. Within a thread, you can set multiple key nodes, and each node can grow follow-up branches, forming a thread forest structure. I think it's better than linear management such as TASK.md.
+
+Use `/memory-thread <prompt>` for natural-language thread management. The `tape_thread` tool supports actions such as `create`, `root`, `branch`, `checkout`, `status`, `search`, `update`, `resume`, and `archive`. Thread nodes are stored as `type: "thread"` anchors and linked in a project thread JSONL file, so the conversation can resume from compact intent state instead of rereading the whole chat.
+
+In `mode: "manual"`, the agent can still read, search, resume, and checkout threads, but it cannot create or mutate thread anchors unless the user authorizes it through `/memory-thread`.
+
+More details: [Tape thread design](docs/tape-thread-design.md)
+
+```txt
+                   thread: tape dev
+                          |
+          +---------------+---------------+
+          |                               |
+ root node: anchors             root node: workflow
+          |                               |
+   +------+------+              +---------+---------+
+   |      |      |              |         |         |
+branch: branch: branch:      branch:   branch:   branch:
+session handoff review       store     manual    docs
+   |      |      |              |         |         |
+node:   node:  node:         node:     node:     node:
+record  gate   browse        HEAD      command   explain
+start   calls  anchors       state     control   forest
+```
+
 ### Tape Review
 
 <img src="docs/memory-review.png" width="400" />
