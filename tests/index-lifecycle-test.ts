@@ -109,10 +109,7 @@ test("TapeThread can be disabled while tape stays enabled", async () => {
   assert.equal(harness.registeredCommands.includes("memory-anchor"), true);
   assert.equal(harness.registeredCommands.includes("memory-thread"), false);
   assert.equal(harness.registeredTools.includes("tape_handoff"), true);
-  assert.equal(
-    harness.registeredTools.some((name) => name.startsWith("tape_thread_")),
-    false,
-  );
+  assert.equal(harness.registeredTools.includes("tape_thread"), false);
 });
 
 test("session_start registers tape tools only once and skips start hooks for replaced sessions", async () => {

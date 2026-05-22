@@ -9,6 +9,25 @@ import { parseSessionFile } from "./tape-reader.js";
 import type { PendingHandoffMatch } from "./tape-tools.js";
 import type { TapeConfig, TapeKeywordConfig } from "./tape-types.js";
 
+// tape thread gate
+const TAPE_THREAD_MUTATION_ACTIONS = new Set(["create", "root", "branch", "update", "archive"]);
+
+export function mutatesTapeThread(action: string): boolean {
+  return TAPE_THREAD_MUTATION_ACTIONS.has(action);
+}
+
+export function shouldBlockTapeThreadAction(
+  settings: MemoryMdSettings,
+  action: string,
+  trigger: "direct" | "manual",
+): string | null {
+  if (!mutatesTapeThread(action)) return null;
+  if (settings.tape?.anchor?.mode !== "manual") return null;
+  return trigger === "manual"
+    ? null
+    : 'TapeThread mutation is disabled when tape.anchor.mode="manual" unless requested via /memory-thread.';
+}
+
 // Resolve tape gate state from cwd and settings.
 export type TapeGateReason = "disabled" | "excluded-dir" | "missing-git" | "enabled";
 

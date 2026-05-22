@@ -156,22 +156,31 @@ TapeThread is enabled by default when tape mode is enabled. Users can explicitly
 }
 ```
 
-Disabling TapeThread keeps normal tape anchors and tape tools available, but does not register `tape_thread_*` tools or `/memory-thread`.
+Disabling TapeThread keeps normal tape anchors and tape tools available, but does not register `tape_thread` or `/memory-thread`.
 
 ## Minimal Tool Set
 
-First phase:
+TapeThread exposes one tool with action-based dispatch:
 
 ```txt
-tape_thread_create
-tape_thread_root
-tape_thread_branch
-tape_thread_checkout
-tape_thread_status
-tape_thread_search
+tape_thread
 ```
 
-### tape_thread_create
+Supported actions:
+
+```txt
+create
+root
+branch
+checkout
+status
+update
+resume
+archive
+search
+```
+
+### tape_thread action=create
 
 Creates a new tape thread.
 
@@ -234,7 +243,7 @@ only create after user confirms
 
 The agent should not create many new threads autonomously. User-confirmed threads are the primary source of truth.
 
-### tape_thread_root
+### tape_thread action=root
 
 Creates another top-level node in the current thread and moves HEAD to it.
 
@@ -248,7 +257,7 @@ append node id to thread.rootNodeIds
 update thread HEAD
 ```
 
-### tape_thread_branch
+### tape_thread action=branch
 
 Creates a named direction from the current HEAD to a child node.
 
@@ -261,13 +270,13 @@ create TapeThreadNode(id = anchor.id, parentNodeId = HEAD, parentSummary = HEAD.
 update thread HEAD
 ```
 
-### tape_thread_checkout
+### tape_thread action=checkout
 
 Moves HEAD to an existing node.
 
-No node history is changed. Only `thread.headNodeId` changes in the thread state record. The thread `updatedAt` should also advance so `tape_thread_list` reflects recent activity.
+No node history is changed. Only `thread.headNodeId` changes in the thread state record. The thread `updatedAt` should also advance so search/list reflects recent activity.
 
-### tape_thread_status
+### tape_thread action=status
 
 Returns compact current context:
 
@@ -279,7 +288,7 @@ Returns compact current context:
 - files
 - memory links
 
-### tape_thread_search
+### tape_thread action=search
 
 Searches threads by name, status, branch, summary, files, memory links, or recent update time.
 

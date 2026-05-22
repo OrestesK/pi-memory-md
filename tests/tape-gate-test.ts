@@ -6,8 +6,10 @@ import {
   buildKeywordHandoffMessage,
   buildSessionBridgeContext,
   detectKeywordHandoff,
+  mutatesTapeThread,
   normalizeTapeKeywords,
   resolveTapeGate,
+  shouldBlockTapeThreadAction,
 } from "../tape/tape-gate.js";
 import { createTempDir, initGitRepo } from "./test-helpers.js";
 
@@ -83,6 +85,21 @@ test("resolveTapeGate still uses git root when onlyGit is false inside a repo", 
   assert.equal(result.reason, "enabled");
   assert.equal(result.project?.root, repoDir);
   assert.equal(result.project?.name, "repo");
+});
+
+test("TapeThread manual gate blocks only content mutations", () => {
+  const settings = { tape: { anchor: { mode: "manual" } } } as never;
+
+  for (const action of ["create", "root", "branch", "update", "archive"]) {
+    assert.equal(mutatesTapeThread(action), true);
+    assert.match(shouldBlockTapeThreadAction(settings, action, "direct") ?? "", /manual/);
+    assert.equal(shouldBlockTapeThreadAction(settings, action, "manual"), null);
+  }
+
+  for (const action of ["status", "search", "resume", "checkout"]) {
+    assert.equal(mutatesTapeThread(action), false);
+    assert.equal(shouldBlockTapeThreadAction(settings, action, "direct"), null);
+  }
 });
 
 test("normalizeTapeKeywords trims, lowercases, and de-duplicates keywords", () => {

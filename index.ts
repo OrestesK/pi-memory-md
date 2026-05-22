@@ -519,8 +519,8 @@ function buildMemoryThreadMessage(prompt: string): string {
   return [
     "The user explicitly requested TapeThread management via /memory-thread.",
     "",
-    "Interpret the user's prompt naturally and use the tape_thread_* tools when the action is clear.",
-    "Available actions include create, branch, checkout, status, search/list/show, update, resume, and archive.",
+    "Interpret the user's prompt naturally and use the tape_thread tool when the action is clear.",
+    "Available actions include create, branch, checkout, status, search, update, resume, and archive.",
     "If checkout target is described by name rather than node id, search first and then checkout the matching node.",
     "If the prompt is only an intent/topic without a clear management action, ask whether to create a related thread and do not call tools yet.",
     "",

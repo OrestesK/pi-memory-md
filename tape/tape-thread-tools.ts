@@ -3,31 +3,23 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { MemoryMdSettings } from "../types.js";
 import { formatTimeSuffix } from "../utils.js";
+import { mutatesTapeThread, shouldBlockTapeThreadAction } from "./tape-gate.js";
 import type { TapeService } from "./tape-service.js";
 import type { TapeThreadNodePatch, TapeThreadStatusView } from "./tape-thread.js";
 import type { RenderState } from "./tape-types.js";
-
-type TapeServiceGetter = () => TapeService | null;
-type TapeSettingsGetter = () => MemoryMdSettings;
-type ThreadTrigger = "direct" | "manual";
-type ConsumeThreadTrigger = () => "manual" | null;
 
 function renderText(text: string): Text {
   return new Text(text, 0, 0);
 }
 
-function unavailableResult() {
-  return { content: [{ type: "text" as const, text: "Tape runtime is unavailable." }], details: { unavailable: true } };
-}
+const unavailableResult = {
+  content: [{ type: "text" as const, text: "Tape runtime is unavailable." }],
+  details: { unavailable: true },
+};
 
-function threadAnchorBlockedResult(trigger: ThreadTrigger) {
+function threadActionBlockedResult(trigger: "direct" | "manual", reason: string) {
   return {
-    content: [
-      {
-        type: "text" as const,
-        text: 'TapeThread anchor creation is disabled when tape.anchor.mode="manual" unless requested via /memory-thread.',
-      },
-    ],
+    content: [{ type: "text" as const, text: reason }],
     details: { disabled: true, handoffMode: "manual", allowedTriggers: ["manual"], trigger },
   };
 }
@@ -63,7 +55,12 @@ function formatSearchResults(results: TapeThreadStatusView[]): string {
     .join("\n");
 }
 
-function createThread(tapeService: TapeService, name: string, summary?: string, trigger: ThreadTrigger = "direct") {
+function createThread(
+  tapeService: TapeService,
+  name: string,
+  summary?: string,
+  trigger: "direct" | "manual" = "direct",
+) {
   if (!name) throw new Error("Thread name is required");
   const anchor = tapeService.createAnchor(`thread/${name}`, "thread", {
     summary: summary ?? name,
@@ -78,7 +75,7 @@ function branchThread(
   branchName: string,
   summary?: string,
   threadId?: string,
-  trigger: ThreadTrigger = "direct",
+  trigger: "direct" | "manual" = "direct",
 ) {
   if (!branchName) throw new Error("Branch name is required");
   const current = tapeService.getThreadStore().status(threadId);
@@ -99,7 +96,7 @@ function createRootNode(
   tapeService: TapeService,
   summary: string,
   threadId?: string,
-  trigger: ThreadTrigger = "direct",
+  trigger: "direct" | "manual" = "direct",
 ) {
   if (!summary) throw new Error("Root node summary is required");
   const current = tapeService.getThreadStore().status(threadId);
@@ -112,146 +109,50 @@ function createRootNode(
   return tapeService.getThreadStore().createRootNode(anchor.id, summary, current.thread.id);
 }
 
+function formatActionResult(action: string, result: unknown): string {
+  if (action === "resume") return result as string;
+  if (action === "archive") return `Archived thread: ${(result as { name: string }).name}`;
+  if (action === "search") return formatSearchResults(result as TapeThreadStatusView[]);
+  return formatThreadStatus(result as TapeThreadStatusView | null);
+}
+
+function formatActionDetails(action: string, result: unknown): unknown {
+  if (action === "resume") return { context: result };
+  if (action === "search") return { results: result };
+  return result ?? {};
+}
+
+const ThreadActionUnion = Type.Union([
+  Type.Literal("create"),
+  Type.Literal("root"),
+  Type.Literal("branch"),
+  Type.Literal("checkout"),
+  Type.Literal("status"),
+  Type.Literal("update"),
+  Type.Literal("resume"),
+  Type.Literal("archive"),
+  Type.Literal("search"),
+]);
+
 export function registerAllTapeThreadTools(
   pi: ExtensionAPI,
-  getTapeService: TapeServiceGetter,
-  getSettings: TapeSettingsGetter,
-  consumeThreadTrigger: ConsumeThreadTrigger = () => null,
+  getTapeService: () => TapeService | null,
+  getSettings: () => MemoryMdSettings,
+  consumeThreadTrigger: () => "manual" | null = () => null,
 ): void {
   pi.registerTool({
-    name: "tape_thread_create",
-    label: "Tape Thread Create",
-    description: "Create a TapeThread",
+    name: "tape_thread",
+    label: "Tape Thread",
+    description: "Manage TapeThread with action=create/root/branch/checkout/status/update/resume/archive/search",
     parameters: Type.Object({
-      name: Type.String({ description: "Thread name" }),
-      summary: Type.Optional(Type.String({ description: "Thread summary" })),
-    }),
-    async execute(_id, params) {
-      const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { name, summary } = params as { name: string; summary?: string };
-      const trigger = consumeThreadTrigger() ?? "direct";
-      if (getSettings().tape?.anchor?.mode === "manual" && trigger !== "manual")
-        return threadAnchorBlockedResult(trigger) as never;
-      const status = createThread(tapeService, name.trim(), summary?.trim(), trigger);
-      return { content: [{ type: "text", text: formatThreadStatus(status) }], details: status };
-    },
-    renderCall(args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_thread_create ")) + theme.fg("accent", args.name));
-    },
-    renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Creating thread..."));
-      return renderText(theme.fg("toolOutput", getResultText(result)));
-    },
-  });
-
-  pi.registerTool({
-    name: "tape_thread_root",
-    label: "Tape Thread Root",
-    description: "Create a new top-level node in the current TapeThread",
-    parameters: Type.Object({
-      summary: Type.String({ description: "Root node summary" }),
+      action: Type.Unsafe({ ...ThreadActionUnion, description: "Thread action" }),
+      name: Type.Optional(Type.String({ description: "Thread name for create" })),
+      summary: Type.Optional(Type.String({ description: "Thread or node summary" })),
+      branchName: Type.Optional(Type.String({ description: "Branch name" })),
+      nodeId: Type.Optional(Type.String({ description: "Node id for checkout" })),
       threadId: Type.Optional(Type.String({ description: "Thread id, defaults to active thread" })),
-    }),
-    async execute(_id, params) {
-      const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { summary, threadId } = params as { summary: string; threadId?: string };
-      const trigger = consumeThreadTrigger() ?? "direct";
-      if (getSettings().tape?.anchor?.mode === "manual" && trigger !== "manual")
-        return threadAnchorBlockedResult(trigger) as never;
-      const status = createRootNode(tapeService, summary.trim(), threadId?.trim(), trigger);
-      return { content: [{ type: "text", text: formatThreadStatus(status) }], details: status };
-    },
-    renderCall(args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_thread_root ")) + theme.fg("accent", args.summary));
-    },
-    renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Creating root node..."));
-      return renderText(theme.fg("toolOutput", getResultText(result)));
-    },
-  });
-
-  pi.registerTool({
-    name: "tape_thread_branch",
-    label: "Tape Thread Branch",
-    description: "Create a branch node from the current thread HEAD",
-    parameters: Type.Object({
-      branchName: Type.String({ description: "Branch name" }),
-      summary: Type.Optional(Type.String({ description: "Branch node summary" })),
-      threadId: Type.Optional(Type.String({ description: "Thread id, defaults to active thread" })),
-    }),
-    async execute(_id, params) {
-      const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { branchName, summary, threadId } = params as { branchName: string; summary?: string; threadId?: string };
-      const trigger = consumeThreadTrigger() ?? "direct";
-      if (getSettings().tape?.anchor?.mode === "manual" && trigger !== "manual")
-        return threadAnchorBlockedResult(trigger) as never;
-      const status = branchThread(tapeService, branchName.trim(), summary?.trim(), threadId?.trim(), trigger);
-      return { content: [{ type: "text", text: formatThreadStatus(status) }], details: status };
-    },
-    renderCall(args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_thread_branch ")) + theme.fg("accent", args.branchName));
-    },
-    renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Branching thread..."));
-      return renderText(theme.fg("toolOutput", getResultText(result)));
-    },
-  });
-
-  pi.registerTool({
-    name: "tape_thread_checkout",
-    label: "Tape Thread Checkout",
-    description: "Move thread HEAD to an existing node",
-    parameters: Type.Object({
-      nodeId: Type.String({ description: "Node id to checkout" }),
-      threadId: Type.Optional(Type.String({ description: "Thread id" })),
-    }),
-    async execute(_id, params) {
-      const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { nodeId, threadId } = params as { nodeId: string; threadId?: string };
-      const status = tapeService.getThreadStore().checkout(nodeId.trim(), threadId?.trim());
-      return { content: [{ type: "text", text: formatThreadStatus(status) }], details: status };
-    },
-    renderCall(args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_thread_checkout ")) + theme.fg("accent", args.nodeId));
-    },
-    renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Checking out thread..."));
-      return renderText(theme.fg("toolOutput", getResultText(result)));
-    },
-  });
-
-  pi.registerTool({
-    name: "tape_thread_status",
-    label: "Tape Thread Status",
-    description: "Get compact current TapeThread context",
-    parameters: Type.Object({ threadId: Type.Optional(Type.String({ description: "Thread id" })) }),
-    async execute(_id, params) {
-      const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { threadId } = params as { threadId?: string };
-      const status = tapeService.getThreadStore().status(threadId?.trim());
-      return { content: [{ type: "text", text: formatThreadStatus(status) }], details: status ?? {} };
-    },
-    renderCall(_args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_thread_status")));
-    },
-    renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Loading thread..."));
-      return renderText(theme.fg("toolOutput", getResultText(result)));
-    },
-  });
-
-  pi.registerTool({
-    name: "tape_thread_update",
-    label: "Tape Thread Update",
-    description: "Patch the current TapeThread HEAD summary, decisions, next tasks, files, or memory links",
-    parameters: Type.Object({
-      threadId: Type.Optional(Type.String({ description: "Thread id, defaults to active thread" })),
-      summary: Type.Optional(Type.String({ description: "Updated HEAD summary" })),
+      query: Type.Optional(Type.String({ description: "Search query" })),
+      includeArchived: Type.Optional(Type.Boolean({ description: "Include archived threads in search" })),
       decisionsAdd: Type.Optional(Type.Array(Type.String(), { description: "Decisions to add" })),
       nextAdd: Type.Optional(Type.Array(Type.String(), { description: "Next tasks to add" })),
       nextRemove: Type.Optional(Type.Array(Type.String(), { description: "Next tasks to remove exactly" })),
@@ -260,90 +161,71 @@ export function registerAllTapeThreadTools(
     }),
     async execute(_id, params) {
       const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { threadId, ...patch } = params as TapeThreadNodePatch & { threadId?: string };
-      const status = tapeService.getThreadStore().updateHead(patch, threadId?.trim());
-      return { content: [{ type: "text", text: formatThreadStatus(status) }], details: status };
-    },
-    renderCall(_args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_thread_update")));
-    },
-    renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Updating thread..."));
-      return renderText(theme.fg("toolOutput", getResultText(result)));
-    },
-  });
+      if (!tapeService) return unavailableResult as never;
 
-  pi.registerTool({
-    name: "tape_thread_resume",
-    label: "Tape Thread Resume",
-    description: "Build compact resume context for a TapeThread",
-    parameters: Type.Object({
-      threadId: Type.Optional(Type.String({ description: "Thread id, defaults to active thread" })),
-    }),
-    async execute(_id, params) {
-      const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { threadId } = params as { threadId?: string };
-      const context = tapeService.getThreadStore().buildResumeContext(threadId?.trim());
-      return { content: [{ type: "text", text: context }], details: { context } };
-    },
-    renderCall(_args, theme) {
-      return renderText(theme.fg("toolTitle", theme.bold("tape_thread_resume")));
-    },
-    renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Building resume context..."));
-      return renderText(theme.fg("toolOutput", getResultText(result)));
-    },
-  });
+      const { action, name, summary, branchName, nodeId, threadId, query, includeArchived, ...patch } =
+        params as TapeThreadNodePatch & {
+          action: string;
+          name?: string;
+          summary?: string;
+          branchName?: string;
+          nodeId?: string;
+          threadId?: string;
+          query?: string;
+          includeArchived?: boolean;
+        };
+      const trigger = mutatesTapeThread(action) ? (consumeThreadTrigger() ?? "direct") : "direct";
+      const blockedReason = shouldBlockTapeThreadAction(getSettings(), action, trigger);
+      if (blockedReason) return threadActionBlockedResult(trigger, blockedReason) as never;
 
-  pi.registerTool({
-    name: "tape_thread_archive",
-    label: "Tape Thread Archive",
-    description: "Archive a TapeThread without deleting JSONL history",
-    parameters: Type.Object({
-      threadId: Type.Optional(Type.String({ description: "Thread id, defaults to active thread" })),
-    }),
-    async execute(_id, params) {
-      const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { threadId } = params as { threadId?: string };
-      const thread = tapeService.getThreadStore().archive(threadId?.trim());
-      return { content: [{ type: "text", text: `Archived thread: ${thread.name}` }], details: thread };
+      const threadStore = tapeService.getThreadStore();
+      let result: unknown;
+      switch (action) {
+        case "create":
+          result = createThread(tapeService, name?.trim() ?? "", summary?.trim(), trigger);
+          break;
+        case "root":
+          result = createRootNode(tapeService, summary?.trim() ?? "", threadId?.trim(), trigger);
+          break;
+        case "branch":
+          result = branchThread(tapeService, branchName?.trim() ?? "", summary?.trim(), threadId?.trim(), trigger);
+          break;
+        case "checkout":
+          if (!nodeId?.trim()) throw new Error("Node id is required");
+          result = threadStore.checkout(nodeId.trim(), threadId?.trim());
+          break;
+        case "status":
+          result = threadStore.status(threadId?.trim());
+          break;
+        case "update":
+          result = threadStore.updateHead({ ...patch, summary: summary?.trim() }, threadId?.trim());
+          break;
+        case "resume":
+          result = threadStore.buildResumeContext(threadId?.trim());
+          break;
+        case "archive":
+          result = threadStore.archive(threadId?.trim());
+          break;
+        case "search":
+          result = threadStore.search(query?.trim(), includeArchived);
+          break;
+        default:
+          throw new Error(`Unsupported TapeThread action: ${action}`);
+      }
+
+      return {
+        content: [{ type: "text", text: formatActionResult(action, result) }],
+        details: formatActionDetails(action, result),
+      };
     },
     renderCall(args, theme) {
+      const target = args.name ?? args.branchName ?? args.nodeId ?? args.threadId ?? args.query ?? "active";
       return renderText(
-        theme.fg("toolTitle", theme.bold("tape_thread_archive ")) + theme.fg("accent", args.threadId ?? "active"),
+        theme.fg("toolTitle", theme.bold("tape_thread ")) + theme.fg("accent", `${args.action}:${target}`),
       );
     },
     renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Archiving thread..."));
-      return renderText(theme.fg("toolOutput", getResultText(result)));
-    },
-  });
-
-  pi.registerTool({
-    name: "tape_thread_search",
-    label: "Tape Thread Search",
-    description: "Search threads; empty query lists recent threads",
-    parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Search query" })),
-      includeArchived: Type.Optional(Type.Boolean({ description: "Include archived threads" })),
-    }),
-    async execute(_id, params) {
-      const tapeService = getTapeService();
-      if (!tapeService) return unavailableResult() as never;
-      const { query, includeArchived } = params as { query?: string; includeArchived?: boolean };
-      const results = tapeService.getThreadStore().search(query?.trim(), includeArchived);
-      return { content: [{ type: "text", text: formatSearchResults(results) }], details: { results } };
-    },
-    renderCall(args, theme) {
-      return renderText(
-        theme.fg("toolTitle", theme.bold("tape_thread_search ")) + theme.fg("accent", args.query ?? "recent"),
-      );
-    },
-    renderResult(result, state: RenderState, theme: Theme) {
-      if (state.isPartial) return renderText(theme.fg("warning", "Searching threads..."));
+      if (state.isPartial) return renderText(theme.fg("warning", "Managing thread..."));
       return renderText(theme.fg("toolOutput", getResultText(result)));
     },
   });
