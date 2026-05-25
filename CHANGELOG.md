@@ -6,6 +6,24 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 我居然直到现在才发现之前几个 release 里的标题级别是错误的。。。
 
+到目前为止，差不多把我计划投入给这个项目的 token 都用完了，想实现的核心功能差不多也完成了。
+
+最开始使用 pi 不是因为 OpenClaw 的爆火，也不是因为 star 的数量，在那个时候 pi 的 star 才刚刚开始。而是我急需一个可以自己扩展的 CLI agent 来学习和构建自己的 agent。机缘巧合下，了解并安装了 pi，当时就觉得这个名字挺符合我的喜好，很容易让人感觉和联想到一种数学美感，我说实话比 codex 和 Claude Code 要好，它们的中心落在了 code 上。在终端里第一次运行，it just works（完全能满足我基础的编程学习需求）！
+
+随后我才知道 pi 火了。
+
+[Building Pi With Pi | Armin Ronacher's Thoughts and Writings](https://lucumr.pocoo.org/2026/5/24/pi-oss/) 今天看到这篇文章。现在我还是不喜欢 AI 成分太高的来作为我需要长期使用的东西。我感觉 pi 也不可避免的要加入到这场 AI 的竞赛当中。
+
+我还是打算把 70% 的 token 用来学习知识和拓展能力，30% 用来写代码和补全（付费和本地的都算）。
+
+我正在着手尝试构建自己的 pi - phi (φ 黄金比例)，回到第一次接触到 pi 的时候就本来要完成的事情，也是对这段时间学习的检验。我不喜欢 TypeScript（虽然 ts 对于构建 agent 来说很友好也挺必须），而且更喜欢 Claude Code 对 shell 部分的交互与处理。
+
+因此后续这个项目的更新会非常缓慢了。这个项目的所有生成的代码都是在 pi 的协助下完成，感谢 pi！在看 pi 的源码和架构的时候，学到了许多。
+
+希望下一个 commit 是在 phi 里完成。
+
+See you!
+
 ## [0.1.38] - 2026-05-25
 
 ### Changed
