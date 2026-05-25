@@ -14,6 +14,7 @@ import { formatCommitTimestamp } from "../utils.js";
 import type { TapeAnchor } from "./tape-anchor.js";
 import { getSessionFilePath, parseSessionFile } from "./tape-reader.js";
 import type { TapeService } from "./tape-service.js";
+import type { TapeThread, TapeThreadNode } from "./tape-thread.js";
 
 export const DEFAULT_MEMORY_REVIEW_LIMIT = 50;
 export const MAX_TAPE_REVIEW_LIMIT = 100;
@@ -27,7 +28,7 @@ const OVERLAY_MIN_HEIGHT = 12;
 const BASE_FRAME_LINES = 5;
 const HEADER_BASE_LINES = 3;
 const SEARCH_EXTRA_LINE = 1;
-const VIEW_MODES: ViewMode[] = ["timeline", "relations", "stats"];
+const VIEW_MODES: ViewMode[] = ["timeline", "threads", "relations", "stats"];
 
 type ReviewStats = {
   purposes: Map<string, number>;
@@ -35,12 +36,25 @@ type ReviewStats = {
   triggers: Map<string, number>;
 };
 
-type ReviewData = {
-  anchors: TapeAnchor[];
-  stats: ReviewStats;
+type ThreadReviewItem = {
+  thread: TapeThread;
+  nodes: TapeThreadNode[];
+  head?: TapeThreadNode;
 };
 
-type ViewMode = "timeline" | "relations" | "stats";
+type ThreadNodeSelection = {
+  item: ThreadReviewItem;
+  node: TapeThreadNode;
+};
+
+type ReviewData = {
+  anchors: TapeAnchor[];
+  nodeAnchors: Map<string, TapeAnchor>;
+  stats: ReviewStats;
+  threads: ThreadReviewItem[];
+};
+
+type ViewMode = "timeline" | "threads" | "relations" | "stats";
 type FrameLine = { text: string; width: number; paddingX: number };
 type SessionEntry = ReturnType<ExtensionContext["sessionManager"]["getEntries"]>[number];
 
@@ -58,8 +72,20 @@ function buildReviewData(tapeService: TapeService, entryScope: "session" | "proj
   const scopedAnchors = tapeService
     .getAnchorStore()
     .scan(entryScope === "session" ? { sessionId: tapeService.getSessionId() } : {});
-  const anchors = scopedAnchors.filter((anchor) => anchor.type !== "session").slice(-limit);
+  const scopedReviewAnchors = scopedAnchors.filter((anchor) => anchor.type !== "session");
+  const anchors = scopedReviewAnchors.slice(-limit);
+  const nodeAnchors = new Map(scopedReviewAnchors.map((anchor) => [anchor.id, anchor]));
   const stats: ReviewStats = { purposes: new Map(), keywords: new Map(), triggers: new Map() };
+  const threadView = tapeService.getThreadStore().load();
+  const threads = [...threadView.threads.values()]
+    .map((thread) => {
+      const nodes = [...threadView.nodes.values()]
+        .filter((node) => node.threadId === thread.id && nodeAnchors.has(node.id))
+        .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+      return { thread, nodes, head: thread.headNodeId ? threadView.nodes.get(thread.headNodeId) : undefined };
+    })
+    .filter((item) => item.nodes.length > 0)
+    .sort((left, right) => Date.parse(right.thread.updatedAt) - Date.parse(left.thread.updatedAt));
 
   for (const anchor of anchors) {
     countValue(stats.purposes, anchor.meta?.purpose);
@@ -67,7 +93,7 @@ function buildReviewData(tapeService: TapeService, entryScope: "session" | "proj
     for (const keyword of anchor.meta?.keywords ?? ["unset"]) countValue(stats.keywords, keyword);
   }
 
-  return { anchors, stats };
+  return { anchors, nodeAnchors, stats, threads };
 }
 
 function sortedStats(values: Map<string, number>): Array<[string, number]> {
@@ -93,35 +119,49 @@ function getAnchorSearchText(anchor: TapeAnchor): string {
     .join(" ");
 }
 
-function getSearchAnchors(anchors: TapeAnchor[], query: string): TapeAnchor[] {
-  if (!query.trim()) return anchors;
+function getSearchItems<T>(items: T[], query: string, getText: (item: T) => string): T[] {
+  if (!query.trim()) return items;
 
   const token = query.trim().toLowerCase();
   if (!query.includes(" ") && token.length >= 2) {
     const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const boundaryRegex = new RegExp(`(^|\\s)${esc(token)}($|\\s)`, "i");
-    const strictMatches = anchors.filter((a) => boundaryRegex.test(getAnchorSearchText(a)));
+    const strictMatches = items.filter((item) => boundaryRegex.test(getText(item)));
     if (strictMatches.length > 0) {
-      const fuzzyMatches = fuzzyFilter(anchors, query, getAnchorSearchText);
-      return strictMatches.filter((a) => fuzzyMatches.includes(a));
+      const fuzzyMatches = fuzzyFilter(items, query, getText);
+      return strictMatches.filter((item) => fuzzyMatches.includes(item));
     }
   }
 
-  return fuzzyFilter(anchors, query, getAnchorSearchText);
+  return fuzzyFilter(items, query, getText);
+}
+
+function getThreadNodeSearchText(selection: ThreadNodeSelection): string {
+  const { item, node } = selection;
+  return [item.thread.id, item.thread.name, item.thread.status, node.id, node.branchName, ...node.branchPath]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function getSearchThreadNodes(threads: ThreadReviewItem[], query: string): ThreadNodeSelection[] {
+  const selections = threads.flatMap((item) => item.nodes.map((node) => ({ item, node })));
+  return getSearchItems(selections, query, getThreadNodeSearchText);
 }
 
 class TapeReviewOverlay implements Component, Focusable {
   private view: ViewMode = "timeline";
   private selectedByView: Record<ViewMode, number>;
   private selectedRelationIndex = 0;
+  private selectedThreadNodeIndex = 0;
   private searchInputActive = false;
   private searchQuery = "";
   private readonly searchInput = new Input();
-  private scrollOffsetByView: Record<ViewMode, number> = { timeline: 0, relations: 0, stats: 0 };
+  private scrollOffsetByView: Record<ViewMode, number> = { timeline: 0, threads: 0, relations: 0, stats: 0 };
   private cachedWidth?: number;
   private cachedBodyLines?: number;
   private cachedLines?: string[];
   private confirmingDeleteId: string | null = null;
+  private confirmingArchiveThreadId: string | null = null;
 
   constructor(
     private readonly data: ReviewData,
@@ -129,11 +169,13 @@ class TapeReviewOverlay implements Component, Focusable {
     private readonly onClose: () => void,
     private readonly onOpenAnchor: (anchor: TapeAnchor) => void,
     private readonly onDeleteAnchor: (id: string) => void,
+    private readonly onArchiveThread: (threadId: string) => void,
+    private readonly onCheckoutThreadNode: (nodeId: string, threadId: string) => void,
     private readonly refreshData: () => ReviewData,
     private readonly calcBodyLines: () => number,
   ) {
     const newestAnchorIndex = Math.max(0, this.data.anchors.length - 1);
-    this.selectedByView = { timeline: newestAnchorIndex, relations: 0, stats: 0 };
+    this.selectedByView = { timeline: newestAnchorIndex, threads: 0, relations: 0, stats: 0 };
     this.selectedRelationIndex = 0;
     this.searchInput.onEscape = () => this.clearSearch();
     this.searchInput.onSubmit = () => this.openSelectedAnchor();
@@ -152,19 +194,14 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   handleInput(data: string): void {
-    if (this.confirmingDeleteId !== null) {
+    if (this.confirmingDeleteId !== null || this.confirmingArchiveThreadId !== null) {
       if (matchesKey(data, Key.enter)) {
-        const idToDelete = this.confirmingDeleteId;
-        this.confirmingDeleteId = null;
-        this.onDeleteAnchor(idToDelete);
-        // Refresh data after deletion
-        Object.assign(this.data, this.refreshData());
-        this.clampSelection();
-        this.invalidate();
+        this.confirmAction();
         return;
       }
       if (matchesKey(data, Key.escape)) {
         this.confirmingDeleteId = null;
+        this.confirmingArchiveThreadId = null;
         this.invalidate();
         return;
       }
@@ -193,11 +230,15 @@ class TapeReviewOverlay implements Component, Focusable {
       return;
     }
     if (matchesKey(data, Key.ctrl("d"))) {
-      const selectedAnchor = this.getSelectedAnchor();
-      if (selectedAnchor && this.view !== "stats") {
-        this.confirmingDeleteId = selectedAnchor.id;
-        this.invalidate();
-      }
+      if (this.view !== "threads") this.startDeleteOrArchive();
+      return;
+    }
+    if (data === "a" && this.view === "threads") {
+      this.startDeleteOrArchive();
+      return;
+    }
+    if (data === "c" && this.view === "threads") {
+      this.checkoutSelectedThreadNode();
       return;
     }
     if (matchesKey(data, Key.enter)) {
@@ -290,13 +331,17 @@ class TapeReviewOverlay implements Component, Focusable {
     if (this.confirmingDeleteId !== null) {
       return this.placeCenter(this.theme.fg("error", `Delete anchor? press enter to confirm · esc to cancel`), width);
     }
+    if (this.confirmingArchiveThreadId !== null) {
+      return this.placeCenter(this.theme.fg("error", `Archive thread? press enter to confirm · esc to cancel`), width);
+    }
     const keywordHint = this.view === "relations" ? " · h/l keyword" : "";
+    const checkoutHint = this.view === "threads" ? " · c checkout" : "";
     const searchHint = " · / search";
-    const deleteHint = this.view !== "stats" ? " · ctrl+d delete" : "";
+    const deleteHint = this.view === "threads" ? " · a archive" : this.view !== "stats" ? " · ctrl+d delete" : "";
     return this.placeCenter(
       this.theme.fg(
         "muted",
-        `←/→/tab switch · ↑/↓/j/k select${keywordHint} · enter open${searchHint}${deleteHint} · q/ctrl+c close`,
+        `←/→/tab switch · ↑/↓/j/k select${keywordHint}${checkoutHint} · enter open${searchHint}${deleteHint} · q/ctrl+c close`,
       ),
       width,
     );
@@ -327,9 +372,11 @@ class TapeReviewOverlay implements Component, Focusable {
     if (this.data.anchors.length === 0) return [this.theme.fg("muted", "No tape anchors found.")];
 
     const searchAnchors = this.getSearchAnchors();
-    if (searchAnchors.length === 0) return [this.theme.fg("muted", `No anchors match /${this.searchQuery}`)];
+    if (this.view !== "threads" && searchAnchors.length === 0)
+      return [this.theme.fg("muted", `No anchors match /${this.searchQuery}`)];
 
     this.clampSelection();
+    if (this.view === "threads") return this.renderThreads(width);
     if (this.view === "relations") return this.renderRelations(width);
     if (this.view === "stats") return this.renderStats(width);
     return this.renderTimeline(width);
@@ -363,6 +410,12 @@ class TapeReviewOverlay implements Component, Focusable {
   private selectionIndicator(): string | null {
     if (this.view === "stats") return null;
 
+    if (this.view === "threads") {
+      const visibleNodes = this.getVisibleThreadNodes();
+      if (visibleNodes.length === 0) return null;
+      return `${this.selectedThreadNodeIndex + 1}/${visibleNodes.length}`;
+    }
+
     const visibleAnchors = this.getVisibleAnchors();
     const selectedAnchor = this.getSelectedAnchor();
     if (!selectedAnchor) return null;
@@ -391,6 +444,71 @@ class TapeReviewOverlay implements Component, Focusable {
       return truncateToWidth(line, width, "…", true);
     });
     return [example, "", ...rows];
+  }
+
+  private renderThreads(width: number): string[] {
+    if (this.data.threads.length === 0) return [this.theme.fg("muted", "No tape threads found.")];
+    const visibleNodes = this.getVisibleThreadNodes();
+    if (visibleNodes.length === 0) return [this.theme.fg("muted", `No threads match /${this.searchQuery}`)];
+
+    const lines = ["Threads", ""];
+    const visibleIds = new Set(visibleNodes.map(({ node }) => node.id));
+
+    for (const item of this.data.threads) {
+      const roots = this.getVisibleThreadRoots(item, visibleIds);
+      if (roots.length === 0) continue;
+
+      const isArchived = item.thread.status === "archived";
+      const status = this.theme.fg(isArchived ? "dim" : "warning", item.thread.status);
+      const name =
+        this.confirmingArchiveThreadId === item.thread.id ? this.theme.fg("error", item.thread.name) : item.thread.name;
+      lines.push(`${name} [${status}]`);
+      lines.push(...this.renderThreadTreeLines(item, roots, visibleNodes, visibleIds, ""));
+      lines.push("");
+    }
+
+    return lines.map((line) => truncateToWidth(line, width, "…", true));
+  }
+
+  private renderThreadTreeLines(
+    item: ThreadReviewItem,
+    nodes: TapeThreadNode[],
+    visibleNodes: ThreadNodeSelection[],
+    visibleIds: Set<string>,
+    prefix: string,
+  ): string[] {
+    return nodes.flatMap((node, index) => {
+      const isLast = index === nodes.length - 1;
+      const connector = isLast ? "└─" : "├─";
+      const continuation = isLast ? "  " : "│ ";
+      const nodeIndex = visibleNodes.findIndex((selection) => selection.node.id === node.id);
+      const isSelected = nodeIndex === this.selectedThreadNodeIndex;
+      const pointer = isSelected ? this.theme.fg("accent", "-> ") : "   ";
+      const branch = node.branchName ?? node.branchPath.at(-1) ?? "root";
+      const head = item.thread.headNodeId === node.id ? this.theme.fg("accent", " ← HEAD") : "";
+      let line = `${pointer}${prefix}${connector} ${branch}${head}`;
+      if (isSelected) line = this.theme.bold(line);
+
+      const children = this.getVisibleThreadChildren(item, node.id, visibleIds);
+      return [
+        line,
+        ...this.renderThreadTreeLines(item, children, visibleNodes, visibleIds, `${prefix}${continuation}`),
+      ];
+    });
+  }
+
+  private getVisibleThreadRoots(item: ThreadReviewItem, visibleIds: Set<string>): TapeThreadNode[] {
+    return item.nodes.filter(
+      (node) => visibleIds.has(node.id) && (!node.parentNodeId || !visibleIds.has(node.parentNodeId)),
+    );
+  }
+
+  private getVisibleThreadChildren(
+    item: ThreadReviewItem,
+    parentNodeId: string,
+    visibleIds: Set<string>,
+  ): TapeThreadNode[] {
+    return item.nodes.filter((node) => visibleIds.has(node.id) && node.parentNodeId === parentNodeId);
   }
 
   private renderRelations(width: number): string[] {
@@ -438,13 +556,42 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   private getSearchAnchors(): TapeAnchor[] {
-    return getSearchAnchors(this.data.anchors, this.searchQuery);
+    return getSearchItems(this.data.anchors, this.searchQuery, getAnchorSearchText);
+  }
+
+  private getVisibleThreadNodes(): ThreadNodeSelection[] {
+    const matchedIds = new Set(getSearchThreadNodes(this.data.threads, this.searchQuery).map(({ node }) => node.id));
+    return this.data.threads.flatMap((item) =>
+      this.flattenThreadTree(item, this.getVisibleThreadRoots(item, matchedIds), matchedIds).map((node) => ({
+        item,
+        node,
+      })),
+    );
+  }
+
+  private flattenThreadTree(
+    item: ThreadReviewItem,
+    nodes: TapeThreadNode[],
+    visibleIds: Set<string>,
+  ): TapeThreadNode[] {
+    return nodes.flatMap((node) => [
+      node,
+      ...this.flattenThreadTree(item, this.getVisibleThreadChildren(item, node.id, visibleIds), visibleIds),
+    ]);
+  }
+
+  private getSelectedThreadNode(): ThreadNodeSelection | undefined {
+    return this.getVisibleThreadNodes()[this.selectedThreadNodeIndex];
   }
 
   private getVisibleAnchors(): TapeAnchor[] {
     switch (this.view) {
       case "timeline":
         return this.getTimelineAnchors();
+      case "threads":
+        return this.getVisibleThreadNodes()
+          .map(({ node }) => this.data.nodeAnchors.get(node.id))
+          .filter((anchor): anchor is TapeAnchor => Boolean(anchor));
       case "relations":
         return this.getRelationGroups().flatMap(([, anchors]) => anchors);
       case "stats":
@@ -454,6 +601,10 @@ class TapeReviewOverlay implements Component, Focusable {
 
   private getSelectedAnchor(): TapeAnchor | undefined {
     if (this.view === "stats") return undefined;
+    if (this.view === "threads") {
+      const selection = this.getSelectedThreadNode();
+      return selection ? this.data.nodeAnchors.get(selection.node.id) : undefined;
+    }
 
     const visibleAnchors = this.getVisibleAnchors();
     if (this.view === "relations") return visibleAnchors[this.selectedRelationIndex];
@@ -463,6 +614,14 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   private moveSelection(delta: -1 | 1): void {
+    if (this.view === "threads") {
+      const visibleNodes = this.getVisibleThreadNodes();
+      if (visibleNodes.length === 0) return;
+      this.selectedThreadNodeIndex = (this.selectedThreadNodeIndex + delta + visibleNodes.length) % visibleNodes.length;
+      this.ensureSelectedVisible();
+      return;
+    }
+
     const visibleAnchors = this.getVisibleAnchors();
     if (visibleAnchors.length === 0) return;
 
@@ -522,11 +681,14 @@ class TapeReviewOverlay implements Component, Focusable {
 
   private getSelectionTopContext(): number {
     if (this.view === "timeline") return 2;
+    if (this.view === "threads") return 3;
     if (this.view === "relations") return 3;
     return 0;
   }
 
   private getSelectedLineIndex(): number | null {
+    if (this.view === "threads") return this.getSelectedThreadLineIndex();
+
     const selectedAnchor = this.getSelectedAnchor();
     if (!selectedAnchor) return null;
 
@@ -551,6 +713,27 @@ class TapeReviewOverlay implements Component, Focusable {
     return null;
   }
 
+  private getSelectedThreadLineIndex(): number | null {
+    const selected = this.getSelectedThreadNode();
+    if (!selected) return null;
+
+    const visibleIds = new Set(this.getVisibleThreadNodes().map(({ node }) => node.id));
+    let lineIndex = 2;
+    for (const item of this.data.threads) {
+      const roots = this.getVisibleThreadRoots(item, visibleIds);
+      if (roots.length === 0) continue;
+      const nodes = this.flattenThreadTree(item, roots, visibleIds);
+      lineIndex += 1;
+      for (const node of nodes) {
+        if (node.id === selected.node.id) return lineIndex;
+        lineIndex += 1;
+      }
+      lineIndex += 1;
+    }
+
+    return null;
+  }
+
   private openSearchInput(): void {
     this.searchInputActive = true;
     this.searchInput.focused = true;
@@ -564,11 +747,7 @@ class TapeReviewOverlay implements Component, Focusable {
       return;
     }
     if (matchesKey(data, Key.ctrl("d"))) {
-      const selectedAnchor = this.getSelectedAnchor();
-      if (selectedAnchor && this.view !== "stats") {
-        this.confirmingDeleteId = selectedAnchor.id;
-        this.invalidate();
-      }
+      if (this.view !== "threads") this.startDeleteOrArchive();
       return;
     }
     if (matchesKey(data, Key.up)) {
@@ -606,6 +785,49 @@ class TapeReviewOverlay implements Component, Focusable {
     if (anchor) this.onOpenAnchor(anchor);
   }
 
+  private startDeleteOrArchive(): void {
+    if (this.view === "threads") {
+      const selected = this.getSelectedThreadNode();
+      if (selected) this.confirmingArchiveThreadId = selected.item.thread.id;
+      this.invalidate();
+      return;
+    }
+
+    const selectedAnchor = this.getSelectedAnchor();
+    if (selectedAnchor && this.view !== "stats") {
+      if (selectedAnchor.type === "thread") return;
+      this.confirmingDeleteId = selectedAnchor.id;
+      this.invalidate();
+    }
+  }
+
+  private confirmAction(): void {
+    if (this.confirmingDeleteId !== null) {
+      const idToDelete = this.confirmingDeleteId;
+      this.confirmingDeleteId = null;
+      this.onDeleteAnchor(idToDelete);
+    }
+
+    if (this.confirmingArchiveThreadId !== null) {
+      const idToArchive = this.confirmingArchiveThreadId;
+      this.confirmingArchiveThreadId = null;
+      this.onArchiveThread(idToArchive);
+    }
+
+    Object.assign(this.data, this.refreshData());
+    this.clampSelection();
+    this.invalidate();
+  }
+
+  private checkoutSelectedThreadNode(): void {
+    const selected = this.getSelectedThreadNode();
+    if (!selected || selected.item.thread.status === "archived") return;
+    this.onCheckoutThreadNode(selected.node.id, selected.item.thread.id);
+    Object.assign(this.data, this.refreshData());
+    this.clampSelection();
+    this.invalidate();
+  }
+
   private clearSearch(): void {
     this.searchInputActive = false;
     this.searchInput.focused = false;
@@ -617,6 +839,12 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   private clampSelection(visibleAnchors = this.getVisibleAnchors()): void {
+    if (this.view === "threads") {
+      const visibleNodes = this.getVisibleThreadNodes();
+      this.selectedThreadNodeIndex = Math.min(this.selectedThreadNodeIndex, Math.max(0, visibleNodes.length - 1));
+      return;
+    }
+
     if (visibleAnchors.length === 0) {
       this.selectedByView[this.view] = 0;
       this.selectedRelationIndex = 0;
@@ -681,10 +909,25 @@ class TapeReviewOverlay implements Component, Focusable {
 
   private detail(width: number): string {
     if (this.view === "stats") return "";
+    if (this.view === "threads") return this.threadDetail(width);
     const anchor = this.getSelectedAnchor();
     if (!anchor) return "";
     const summary = anchor.meta?.summary || "no summary";
     return truncateToWidth(`${anchor.name} · ${summary}`, width, "…", true);
+  }
+
+  private threadDetail(width: number): string {
+    const selected = this.getSelectedThreadNode();
+    if (!selected) return "";
+    const { item, node } = selected;
+    const next = node.next?.length ? ` · next: ${node.next.join(", ")}` : "";
+    const files = node.files?.length ? ` · files: ${node.files.join(", ")}` : "";
+    return truncateToWidth(
+      `${item.thread.name} · ${node.branchPath.join("/")} · ${node.summary}${next}${files}`,
+      width,
+      "…",
+      true,
+    );
   }
 
   private nextView(): ViewMode {
@@ -765,6 +1008,8 @@ export async function openMemoryReview(
           () => done(null),
           (anchor) => done(anchor),
           (id) => tapeService.deleteAnchor(id),
+          (threadId) => tapeService.getThreadStore().archive(threadId),
+          (nodeId, threadId) => tapeService.getThreadStore().checkout(nodeId, threadId),
           () => buildReviewData(tapeService, entryScope, normalizeMemoryReviewLimit(limit)),
           calcBodyLines,
         );

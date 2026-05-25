@@ -43,6 +43,7 @@ When tape-mode is on, `sessionBridge` also scans handoff anchors and builds a se
 
 ## New Features
 
+- Added Thread Review UI to `/memory-review` for browsing tape thread nodes, opening node anchors, checking out nodes, and archiving threads from the visual overlay.
 - Added TapeThread, a tape-backed intent thread layer with dedicated `thread` anchors for managing long-running work with root nodes, named branches, checkout, compact resume context, and optional `tape.thread: false` disablement. See [TapeThread Design](docs/tape-thread-design.md).
   Inspired by: [Getting the most out of Codex](https://x.com/jxnlco/status/2057153744630890620)
 - Added `hooks.beforeAgentStart: ["sessionBridge"]`, an opt-in bridge for closely related `new`/`resume`/`fork` sessions. It indexes recent previous session messages, plus handoff anchors when tape is active, and sends only prompt-relevant matches to the next agent turn. In `message-append` delivery it joins the startup memory message; in `system-prompt` delivery it is sent as a hidden bridge message.

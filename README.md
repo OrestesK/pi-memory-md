@@ -389,6 +389,8 @@ Prompts should evolve into intent.
 
 ### Tape Thread
 
+<img src="docs/thread-review.png" width="400" />
+
 Tape Thread is a lightweight memory-thread layer built on top of tape anchors. It turns long-running work into a small tree of resumable checkpoints: a thread has one or more root nodes, branches can split from the current HEAD, and each node can keep its summary, decisions, next steps, relevant files, and memory links.
 
 `thread -> root node -> branch -> node`, each `thread-anchor` is a node, and linking them together forms a thread. A thread represents a specific topic or task the user is working on. Within a thread, you can set multiple key nodes, and each node can grow follow-up branches, forming a thread forest structure. I think it's better than linear management such as TASK.md.
@@ -420,17 +422,18 @@ start   calls  anchors       state     control   forest
 
 <img src="docs/memory-review.png" width="400" />
 
-`/memory-review` opens an interactive overlay for browsing tape anchors — a dedicated visual panel for jumping across anchors. Select an anchor to jump directly to the first assistant entry after it in the session tree.
+`/memory-review` opens an interactive overlay for browsing tape anchors and threads. Select an anchor or thread node to jump directly to the first assistant entry after it in the session tree.
 
 The panel provides:
 
 - **Timeline view**: Browse all anchors in the current project chronologically
+- **Threads view**: Browse thread nodes, jump to node anchors, press `c` to checkout a node, or press `a` to archive a thread
 - **Keyword relations**: Visual connections between anchors and their keywords
 - **Stats overview**: Quick summary of anchor counts, types, and distributions
-- **Fuzzy search**: Type `/` to filter anchors across names, summaries, purposes, triggers, keywords, and timestamps — press `Esc` or `Ctrl+c` to leave search input
-- **Anchor deletion**: Select an anchor and press `Ctrl+d` to delete it
+- **Fuzzy search**: Type `/` to filter anchors and thread nodes — press `Esc` or `Ctrl+c` to leave search input
+- **Anchor deletion**: Select a non-thread anchor and press `Ctrl+d` to delete it
 
-The panel only helps you land on the right anchor. After jumping there, any deeper branching or tree operations still belong in Pi's native `/tree` panel. This design is intentionally non-invasive.
+The panel helps you land on the right anchor or thread node. After jumping there, any deeper branching or tree operations still belong in Pi's native `/tree` panel. This design is intentionally non-invasive.
 
 ### Full Configuration
 
