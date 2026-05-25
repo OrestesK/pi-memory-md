@@ -55,41 +55,38 @@ function formatSearchResults(results: TapeThreadStatusView[]): string {
     .join("\n");
 }
 
-function createThread(
-  tapeService: TapeService,
-  name: string,
-  summary?: string,
-  trigger: "direct" | "manual" = "direct",
-) {
+function createThread(tapeService: TapeService, name: string) {
   if (!name) throw new Error("Thread name is required");
-  const anchor = tapeService.createAnchor(`thread/${name}`, "thread", {
-    summary: summary ?? name,
-    purpose: "thread",
-    trigger,
-  });
-  return tapeService.getThreadStore().createThread(name, anchor.id);
+  return tapeService.getThreadStore().createThread(name);
 }
 
-function branchThread(
-  tapeService: TapeService,
-  branchName: string,
-  summary?: string,
-  threadId?: string,
-  trigger: "direct" | "manual" = "direct",
-) {
+function branchThread(tapeService: TapeService, branchName: string, threadId?: string) {
   if (!branchName) throw new Error("Branch name is required");
   const current = tapeService.getThreadStore().status(threadId);
   if (!current) throw new Error(threadId ? `Thread not found: ${threadId}` : "No active thread");
+  return tapeService.getThreadStore().createBranch(branchName, current.thread.id);
+}
+
+function createNode(
+  tapeService: TapeService,
+  summary: string,
+  branchName?: string,
+  threadId?: string,
+  trigger: "direct" | "manual" = "direct",
+) {
+  if (!summary) throw new Error("Node summary is required");
+  const current = tapeService.getThreadStore().status(threadId);
+  if (!current) throw new Error(threadId ? `Thread not found: ${threadId}` : "No active thread");
+  const branchSuffix = branchName ? `-${branchName}` : "";
   const anchor = tapeService.createAnchor(
-    `thread/${current.thread.name}-${branchName}-${formatTimeSuffix()}-[node]`,
+    `thread/${current.thread.name}${branchSuffix}-${formatTimeSuffix()}-[node]`,
     "thread",
     {
-      summary: summary ?? branchName,
-      purpose: "branch",
+      summary,
       trigger,
     },
   );
-  return tapeService.getThreadStore().createBranch(branchName, anchor.id, summary, current.thread.id);
+  return tapeService.getThreadStore().createNode(anchor.id, summary, branchName, current.thread.id);
 }
 
 function createRootNode(
@@ -103,7 +100,6 @@ function createRootNode(
   if (!current) throw new Error(threadId ? `Thread not found: ${threadId}` : "No active thread");
   const anchor = tapeService.createAnchor(`thread/${current.thread.name}-${formatTimeSuffix()}-[root-node]`, "thread", {
     summary,
-    purpose: "root-node",
     trigger,
   });
   return tapeService.getThreadStore().createRootNode(anchor.id, summary, current.thread.id);
@@ -126,6 +122,7 @@ const ThreadActionUnion = Type.Union([
   Type.Literal("create"),
   Type.Literal("root"),
   Type.Literal("branch"),
+  Type.Literal("node"),
   Type.Literal("checkout"),
   Type.Literal("status"),
   Type.Literal("update"),
@@ -143,7 +140,7 @@ export function registerAllTapeThreadTools(
   pi.registerTool({
     name: "tape_thread",
     label: "Tape Thread",
-    description: "Manage TapeThread with action=create/root/branch/checkout/status/update/resume/archive/search",
+    description: "Manage TapeThread with action=create/root/branch/node/checkout/status/update/resume/archive/search",
     parameters: Type.Object({
       action: Type.Unsafe({ ...ThreadActionUnion, description: "Thread action" }),
       name: Type.Optional(Type.String({ description: "Thread name for create" })),
@@ -182,13 +179,22 @@ export function registerAllTapeThreadTools(
       let result: unknown;
       switch (action) {
         case "create":
-          result = createThread(tapeService, name?.trim() ?? "", summary?.trim(), trigger);
+          result = createThread(tapeService, name?.trim() ?? "");
           break;
         case "root":
           result = createRootNode(tapeService, summary?.trim() ?? "", threadId?.trim(), trigger);
           break;
         case "branch":
-          result = branchThread(tapeService, branchName?.trim() ?? "", summary?.trim(), threadId?.trim(), trigger);
+          result = branchThread(tapeService, branchName?.trim() ?? "", threadId?.trim());
+          break;
+        case "node":
+          result = createNode(
+            tapeService,
+            summary?.trim() ?? "",
+            branchName?.trim() || undefined,
+            threadId?.trim(),
+            trigger,
+          );
           break;
         case "checkout":
           if (!nodeId?.trim()) throw new Error("Node id is required");

@@ -9,24 +9,26 @@ test("TapeThreadStore creates, branches, checks out, searches, and replays", () 
   const tapeDir = createTempDir("pi-memory-md-tape-thread");
   const store = new TapeThreadStore(tapeDir, "project");
 
-  const thread = store.createThread("pi-memory-md tape mode", "anchor-thread");
+  const thread = store.createThread("pi-memory-md tape mode");
   const root = store.createRootNode("anchor-root", "root summary", thread.thread.id);
-  const branch = store.createBranch("checkout", "anchor-branch", "implement checkout", thread.thread.id);
+  const branchRoute = store.createBranch("checkout", thread.thread.id);
+  const branch = store.createNode("anchor-branch", "implement checkout", "checkout", thread.thread.id);
   const secondRoot = store.createRootNode("anchor-root-2", "docs refresh", thread.thread.id);
   const threadLog = fs.readFileSync(path.join(tapeDir, "project__threads.jsonl"), "utf-8");
   const threadRecord = JSON.parse(threadLog.trim());
   const threadState = threadRecord["pi-memory-md tape mode"];
   assert.equal(threadState.thread.id, thread.thread.id);
-  assert.equal(threadState.thread.anchorId, "anchor-thread");
+  assert.equal("anchorId" in threadState.thread, false);
   assert.deepEqual(threadState.thread.rootNodeIds, [root.head?.id, secondRoot.head?.id]);
   assert.equal(root.head?.id, "anchor-root");
   assert.equal(branch.head?.id, "anchor-branch");
   assert.equal(threadState.nodes.length, 3);
+  assert.equal(branchRoute.head?.id, root.head?.id);
   assert.deepEqual(threadState.branches, [
     {
       name: "checkout",
       fromNodeId: root.head?.id,
-      toNodeId: branch.head?.id,
+      toNodeIds: [branch.head?.id],
     },
   ]);
   assert.deepEqual(threadState.tree, [
@@ -96,9 +98,11 @@ test("TapeThreadStore rejects invalid state records", () => {
   const tapeDir = createTempDir("pi-memory-md-tape-thread-empty");
   const store = new TapeThreadStore(tapeDir, "project");
 
-  assert.throws(() => store.createThread("", "anchor-root"), /Thread name is required/);
-  assert.throws(() => store.createThread("valid", ""), /Anchor id is required/);
+  assert.throws(() => store.createThread(""), /Thread name is required/);
 
-  store.createThread("valid", "anchor-root");
-  assert.throws(() => store.createThread("valid", "anchor-other"), /Thread already exists/);
+  const thread = store.createThread("valid");
+  assert.throws(() => store.createThread("valid"), /Thread already exists/);
+  assert.throws(() => store.createBranch("branch", thread.thread.id), /Thread has no HEAD node/);
+  store.createRootNode("anchor-root", "root", thread.thread.id);
+  assert.throws(() => store.createBranch("", thread.thread.id), /Branch name is required/);
 });

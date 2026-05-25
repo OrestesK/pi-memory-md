@@ -10,7 +10,7 @@ import type { PendingHandoffMatch } from "./tape-tools.js";
 import type { TapeConfig, TapeKeywordConfig } from "./tape-types.js";
 
 // tape thread gate
-const TAPE_THREAD_MUTATION_ACTIONS = new Set(["create", "root", "branch", "update", "archive"]);
+const TAPE_THREAD_MUTATION_ACTIONS = new Set(["create", "root", "branch", "node", "update", "archive"]);
 
 export function mutatesTapeThread(action: string): boolean {
   return TAPE_THREAD_MUTATION_ACTIONS.has(action);

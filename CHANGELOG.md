@@ -4,6 +4,20 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 
 ## [Unreleased]
 
+我居然直到现在才发现之前几个 release 里的标题级别是错误的。。。
+
+## [0.1.38] - 2026-05-25
+
+### Changed
+
+The previous thread design created too many anchors, and many of them were unnecessary.
+
+The current design treats anchors as meaningful checkpoints, not as a log for every thread operation. Creating a thread, creating a branch route, checking out a node, or updating the current head is tracked in the thread state file only. Tape anchors are now reserved for root/node checkpoints that contain resumable context such as summaries, decisions, next tasks, files, and memory links. Thread anchors also no longer write hard-coded `purpose` values like `root-node` or `node`, because those labels add no useful intent signal for the agent.
+
+- Refined TapeThread creation flow by separating lightweight thread/branch routing from anchor-backed root/node checkpoints. This avoids creating tape anchors for structural routing changes while keeping anchors reserved for meaningful resumable context.
+- Updated TapeThread branch records to support multiple node targets from the same branch point, so a branch route can accumulate related checkpoints over time.
+- Hid TapeThread anchors from the `/memory-review` timeline view while keeping them available in the dedicated thread view.
+
 ## [0.1.37] - 2026-05-25
 
 <details>
@@ -41,11 +55,11 @@ In this release, long-term memory management is strengthened across several area
 
 </details>
 
-## Breaking Changes
+### Breaking Changes
 
 - Migrated pi package imports and runtime dependencies to the new `@earendil-works/*` npm scope introduced in [pi v0.74.0](https://github.com/earendil-works/pi/releases/tag/v0.74.0). This GitHub version now requires pi packages from `@earendil-works` (`>=0.74.0`).
 
-## New Features
+### New Features
 
 - Added Thread Review UI to `/memory-review` for browsing tape thread nodes, opening node anchors, checking out nodes, and archiving threads from the visual overlay.
 - Added TapeThread, a tape-backed intent thread layer with dedicated `thread` anchors for managing long-running work with root nodes, named branches, checkout, compact resume context, and optional `tape.thread: false` disablement. See [TapeThread Design](docs/tape-thread-design.md).
@@ -54,7 +68,7 @@ In this release, long-term memory management is strengthened across several area
 - Added BM25-based ranking for memory retrieval via `@orama/orama`, with Chinese tokenization via `nodejieba`. `memory_search(query)` now uses BM25 ranking by default to prioritize relevant memory files by title/tags/description/content, and tape smart-mode delivery uses the first prompt plus recent anchor summary/purpose/keywords to rank candidate files. Chinese and mixed-language query/index text is segmented before ranking, improving fuzzy-topic recall and reducing noisy top results from pure keyword/recency ordering.
 - Added `memory-digest` skill for turning recent tape anchors and relevant session context into confirmed durable memory updates via `memory-write`.
 
-## Changed
+### Changed
 
 - Added `/memory-check` scope options (`-g`/`--global`/`global` and `-p`/`--project`/`project`) while keeping tree line-count arguments order-independent.
 - Classified pi's native `session_start` reasons into `runtimeStart` (`startup`/`reload`) and `switchStart` (`new`/`resume`/`fork`) so the `sessionStart` hook type maps to our runtime-start lifecycle, while switch starts remain available for `previousSessionFile`-based bridge context.
@@ -64,7 +78,7 @@ In this release, long-term memory management is strengthened across several area
 - Refined tape smart analysis scoring with smooth time decay, BM25-inspired repeated-access saturation, anchor decay boosts, and a clearer multi-signal event score model for selecting active memory and project files.
 - Removed the registered `tape_list` tool. Use `tape_search({ kinds: ["anchor"], contextLines })` for the same recent-anchor browsing workflow, now with anchor ids, filters, range options, and optional nearby context in one tool.
 
-## Fixed
+### Fixed
 
 - Skipped empty tape delivery when no memory/project files are selected; tape context builders now return `null` for no content and omit empty sections, avoiding blank custom messages or system-prompt additions. Initial context cache state now explicitly distinguishes `pending`, `empty`, and `ready`, preventing an empty first selection from being re-initialized and delivered unexpectedly later in the same session.
 - `tape_search` now falls back from session-scope entry and anchor search to project-scope search when the session has no matching results.
@@ -123,7 +137,7 @@ The trend toward industrialization and standardization is unavoidable, but as al
 
 </details>
 
-## New Features
+### New Features
 
 - **`/memory-review` slash command**: Opens an interactive Memory Review overlay for browsing tape anchors by timeline, keyword relations, and stats, with keyboard navigation and dynamic terminal-aware layout. Pressing `enter` on a selected anchor now jumps through pi's session tree to the first assistant entry after that anchor. This slash command is only registered when tape mode is enabled.
   Search is available with `/`: type to fuzzy-filter anchors across names, summaries, purposes, triggers, keywords, and timestamps. Press `Esc` or `Ctrl+C` to leave search input.
@@ -131,7 +145,7 @@ The trend toward industrialization and standardization is unavoidable, but as al
 
 - **`memory-import` skill**: New skill for importing durable knowledge from URLs, folders, or files into pi-memory-md. Uses `npx defuddle` for web content extraction, analyzes sources before writing, asks for focus confirmation, and generates memories directly via `memory-write` skill with proper description, tags, and source references.
 
-## Changed
+### Changed
 - Removed the `memory-sync` and `memory-search` skills. Sync and search are now covered by the native `memory_sync` and `memory_search` tools, avoiding duplicate skill/tool designs.
 - Refined memory metadata around a unified `MemoryMeta` model shared by tools and commands, covering project metadata, project memory, global memory, initialization state, and file counts.
 - Simplified `memory_check` tool output for LLM use: it now returns concise project/global memory paths and file lists without tree output, while keeping lightweight renderer details only for UI summaries.
@@ -143,7 +157,7 @@ The trend toward industrialization and standardization is unavoidable, but as al
 - Tape runtime now detaches captured `sessionManager` references on session shutdown or runtime replacement via `TapeService.detachSessionTree()`, and clears the active tape runtime during shutdown to avoid reusing stale session-bound objects. See [v0.69.0](https://github.com/badlogic/pi-mono/releases/tag/v0.69.0)
 - Updated TypeBox imports from `@sinclair/typebox` to `typebox` to match pi `0.69.0+`, where pi switched to the new TypeBox package name.
 
-## Fixed
+### Fixed
 
 - Clarified `session_start` handling for `/new` and `/fork` sessions with `previousSessionFile`: memory context is delivered without rerunning session-start hooks, avoiding duplicate hook execution while preserving handoff context. This follows pi's documented lifecycle where `/new` emits `session_start { reason: "new", previousSessionFile? }` and `/fork` emits `session_start { reason: "fork", previousSessionFile }`. See [pi extension lifecycle](https://github.com/badlogic/pi-mono/blob/v0.72.0/packages/coding-agent/docs/extensions.md#lifecycle-overview) and [session_start](https://github.com/badlogic/pi-mono/blob/v0.72.0/packages/coding-agent/docs/extensions.md#session_start).
 - Optimized git sync checks with a 12-hour `FETCH_HEAD` freshness window: recent fetch/pull evidence skips another `git fetch`, stale or missing evidence refreshes upstream first, behind detection still uses `git rev-list --count HEAD..@{u}`, and updates now run `git rebase --autostash @{u}` to avoid the extra fetch performed by `git pull --rebase --autostash`. A post-update behind check still warns users to resolve git issues manually if commits remain behind upstream.
@@ -166,7 +180,7 @@ Those new Markdown files are not mandatory, they can work well alongside the use
 
 </details>
 
-## Changes
+### Changes
 
 - Updated memory layout naming and initialization paths: shared global files now live directly under `{globalMemory}/` as `USER.md`, `MEMORY.md`, and `TASK.md`, while project task memory now uses `core/TASK.md` instead of `core/task/task.md`.
   `MEMORY.md` is only offered for `globalMemory`, and preference content is consolidated into `USER.md` instead of separate `prefer.md` files.
@@ -179,7 +193,7 @@ Those new Markdown files are not mandatory, they can work well alongside the use
 - Refined delivered memory context formatting: it now uses a unified `# Memory Context` header, clearer global/project sections, absolute memory file paths, and a short note that memory files help the agent better understand the project and the user.
 - Commented out legacy built-in memory initialization helpers and removed their tests, since initialization now lives in the `memory-init` skill.
 
-## Fixed
+### Fixed
 
 - Fixed `memory_check` and global memory enablement detection: shared global memory is now treated as enabled only when `memoryDir.globalMemory` is explicitly configured.
   When project memory exists but shared global memory is missing, `memory_check` no longer reports `Not initialized`; it continues to show the project memory structure and only warns about the missing shared global directory when global memory was actually enabled by config.

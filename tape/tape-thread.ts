@@ -12,7 +12,6 @@ export type TapeThreadRouting = {
 export type TapeThread = {
   id: string;
   name: string;
-  anchorId: string;
   rootNodeIds: string[];
   headNodeId?: string;
   status: TapeThreadStatus;
@@ -49,7 +48,7 @@ export type TapeThreadNodePatch = {
 export type TapeThreadBranch = {
   name: string;
   fromNodeId: string;
-  toNodeId: string;
+  toNodeIds: string[];
 };
 
 export type TapeThreadTreeNode = {
@@ -69,6 +68,7 @@ export type TapeThreadRecord = Record<string, TapeThreadRecordValue>;
 export type TapeThreadView = {
   threads: Map<string, TapeThread>;
   nodes: Map<string, TapeThreadNode>;
+  branches: Map<string, TapeThreadBranch[]>;
 };
 
 export type TapeThreadStatusView = {
@@ -106,18 +106,12 @@ function buildThreadTree(thread: TapeThread, nodes: TapeThreadNode[]): TapeThrea
   });
 }
 
-function toThreadRecord(thread: TapeThread, nodes: TapeThreadNode[]): TapeThreadRecord {
+function toThreadRecord(thread: TapeThread, nodes: TapeThreadNode[], branches: TapeThreadBranch[]): TapeThreadRecord {
   return {
     [thread.name]: {
       thread,
       nodes,
-      branches: nodes
-        .filter((node) => node.parentNodeId && node.branchName)
-        .map((node) => ({
-          name: node.branchName ?? "",
-          fromNodeId: node.parentNodeId ?? "",
-          toNodeId: node.id,
-        })),
+      branches,
       tree: buildThreadTree(thread, nodes),
     },
   };
@@ -159,14 +153,23 @@ function normalizeThread(
   const rootNodeIds =
     thread.rootNodeIds ??
     (thread.rootNodeId ? [thread.rootNodeId] : nodes.filter((node) => !node.parentNodeId).map((node) => node.id));
-  const { rootNodeId: _rootNodeId, ...normalized } = thread;
-  return { ...normalized, anchorId: normalized.anchorId ?? "", rootNodeIds };
+  const { rootNodeId: _rootNodeId, anchorId: _anchorId, ...normalized } = thread;
+  return { ...normalized, rootNodeIds };
+}
+
+function normalizeBranch(branch: TapeThreadBranch & { toNodeId?: string }): TapeThreadBranch {
+  return {
+    name: branch.name,
+    fromNodeId: branch.fromNodeId,
+    toNodeIds: branch.toNodeIds ?? (branch.toNodeId ? [branch.toNodeId] : []),
+  };
 }
 
 function applyRecord(view: TapeThreadView, record: TapeThreadRecord): void {
   for (const value of Object.values(record)) {
     const thread = normalizeThread(value.thread, value.nodes);
     view.threads.set(thread.id, thread);
+    view.branches.set(thread.id, value.branches.map(normalizeBranch));
     for (const node of value.nodes) view.nodes.set(node.id, node);
   }
 }
@@ -179,9 +182,8 @@ export class TapeThreadStore {
     this.filePath = path.join(tapeBasePath, `${projectName}__threads.jsonl`);
   }
 
-  createThread(name: string, anchorId: string): TapeThreadStatusView {
+  createThread(name: string): TapeThreadStatusView {
     assertNonEmpty(name, "Thread name");
-    assertNonEmpty(anchorId, "Anchor id");
     const view = this.load();
     if ([...view.threads.values()].some((thread) => thread.name === name))
       throw new Error(`Thread already exists: ${name}`);
@@ -190,7 +192,6 @@ export class TapeThreadStore {
     const thread: TapeThread = {
       id: crypto.randomUUID(),
       name,
-      anchorId,
       rootNodeIds: [],
       status: "active",
       createdAt: timestamp,
@@ -198,6 +199,7 @@ export class TapeThreadStore {
     };
 
     view.threads.set(thread.id, thread);
+    view.branches.set(thread.id, []);
     this.save(view);
     return { thread, path: [] };
   }
@@ -231,9 +233,30 @@ export class TapeThreadStore {
     return { thread: updatedThread, head: node, path: [node] };
   }
 
-  createBranch(branchName: string, anchorId: string, summary?: string, threadId?: string): TapeThreadStatusView {
+  createBranch(branchName: string, threadId?: string): TapeThreadStatusView {
     assertNonEmpty(branchName, "Branch name");
+    const view = this.load();
+    const thread = this.resolveThread(view, threadId);
+    assertMutableThread(thread);
+    const parent = thread.headNodeId ? view.nodes.get(thread.headNodeId) : undefined;
+    if (!parent) throw new Error(`Thread has no HEAD node: ${thread.name}`);
+
+    const branches = view.branches.get(thread.id) ?? [];
+    if (branches.some((branch) => branch.fromNodeId === parent.id && branch.name === branchName)) {
+      throw new Error(`Branch already exists from HEAD: ${branchName}`);
+    }
+
+    const timestamp = nowIso();
+    const updatedThread = { ...thread, updatedAt: timestamp };
+    view.threads.set(updatedThread.id, updatedThread);
+    view.branches.set(thread.id, [...branches, { name: branchName, fromNodeId: parent.id, toNodeIds: [] }]);
+    this.save(view);
+    return { thread: updatedThread, head: parent, path: this.buildPath(view.nodes, parent) };
+  }
+
+  createNode(anchorId: string, summary: string, branchName?: string, threadId?: string): TapeThreadStatusView {
     assertNonEmpty(anchorId, "Anchor id");
+    assertNonEmpty(summary, "Node summary");
     const view = this.load();
     const thread = this.resolveThread(view, threadId);
     assertMutableThread(thread);
@@ -247,8 +270,8 @@ export class TapeThreadStore {
       parentNodeId: parent.id,
       parentSummary: parent.summary,
       branchName,
-      branchPath: [...parent.branchPath, branchName],
-      summary: summary ?? branchName,
+      branchPath: [...parent.branchPath, branchName ?? summary],
+      summary,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -256,6 +279,7 @@ export class TapeThreadStore {
     const updatedThread = { ...thread, headNodeId: node.id, updatedAt: timestamp };
     view.threads.set(updatedThread.id, updatedThread);
     view.nodes.set(node.id, node);
+    if (branchName) this.attachNodeToBranch(view, thread.id, parent.id, branchName, node.id);
     this.save(view);
     return { thread: updatedThread, head: node, path: this.buildPath(view.nodes, node) };
   }
@@ -368,7 +392,7 @@ export class TapeThreadStore {
   }
 
   load(): TapeThreadView {
-    const view: TapeThreadView = { threads: new Map(), nodes: new Map() };
+    const view: TapeThreadView = { threads: new Map(), nodes: new Map(), branches: new Map() };
     if (!fs.existsSync(this.filePath)) return view;
 
     const lines = fs
@@ -397,6 +421,22 @@ export class TapeThreadStore {
     return thread;
   }
 
+  private attachNodeToBranch(
+    view: TapeThreadView,
+    threadId: string,
+    fromNodeId: string,
+    branchName: string,
+    nodeId: string,
+  ): void {
+    const branches = view.branches.get(threadId) ?? [];
+    const index = branches.findIndex((branch) => branch.fromNodeId === fromNodeId && branch.name === branchName);
+    const branch = branches[index] ?? { name: branchName, fromNodeId, toNodeIds: [] };
+    const updatedBranch = { ...branch, toNodeIds: [...new Set([...branch.toNodeIds, nodeId])] };
+    const updatedBranches =
+      index === -1 ? [...branches, updatedBranch] : branches.map((item, i) => (i === index ? updatedBranch : item));
+    view.branches.set(threadId, updatedBranches);
+  }
+
   private buildPath(nodes: Map<string, TapeThreadNode>, node: TapeThreadNode): TapeThreadNode[] {
     const pathNodes: TapeThreadNode[] = [];
     let current: TapeThreadNode | undefined = node;
@@ -419,7 +459,7 @@ export class TapeThreadStore {
         const nodes = [...view.nodes.values()]
           .filter((node) => node.threadId === thread.id)
           .sort((left, right) => toTimestamp(left.createdAt) - toTimestamp(right.createdAt));
-        return JSON.stringify(toThreadRecord(thread, nodes));
+        return JSON.stringify(toThreadRecord(thread, nodes, view.branches.get(thread.id) ?? []));
       });
 
     fs.writeFileSync(this.filePath, `${records.join("\n")}${records.length ? "\n" : ""}`, "utf-8");

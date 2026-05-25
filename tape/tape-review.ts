@@ -105,6 +105,10 @@ function bar(value: number, max: number): string {
   return `${"█".repeat(size)}${" ".repeat(BAR_WIDTH - size)}`;
 }
 
+export function isTimelineReviewAnchor(anchor: TapeAnchor): boolean {
+  return anchor.type !== "thread";
+}
+
 function getAnchorSearchText(anchor: TapeAnchor): string {
   return [
     anchor.name,
@@ -552,7 +556,9 @@ class TapeReviewOverlay implements Component, Focusable {
   }
 
   private getTimelineAnchors(): TapeAnchor[] {
-    return [...this.getSearchAnchors()].sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
+    return [...this.getSearchAnchors()]
+      .filter(isTimelineReviewAnchor)
+      .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp));
   }
 
   private getSearchAnchors(): TapeAnchor[] {

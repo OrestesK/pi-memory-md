@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { registerAllTapeThreadTools } from "../tape/tape-thread-tools.js";
 
+type CreatedAnchor = { id: string; name: string; type: string; meta?: unknown };
+
 function createHarness(settings: Record<string, unknown>, consumeThreadTrigger = () => null as "manual" | null) {
   const tools = new Map<string, { execute: (...args: unknown[]) => Promise<unknown> }>();
-  const createdAnchors: unknown[] = [];
+  const createdAnchors: CreatedAnchor[] = [];
   const status = {
     thread: { id: "thread-id", name: "demo", status: "active" },
     path: [],
@@ -22,6 +24,10 @@ function createHarness(settings: Record<string, unknown>, consumeThreadTrigger =
     },
     createBranch: () => {
       calls.push("createBranch");
+      return status;
+    },
+    createNode: () => {
+      calls.push("createNode");
       return status;
     },
     checkout: () => {
@@ -73,19 +79,17 @@ test("TapeThread anchor creation is blocked in manual mode without slash command
   assert.equal(createdAnchors.length, 0);
 });
 
-test("TapeThread slash command marks created anchors as manual", async () => {
+test("TapeThread slash command marks node anchors as manual", async () => {
   const { tools, createdAnchors } = createHarness({ tape: { anchor: { mode: "manual" } } }, () => "manual");
   const threadTool = tools.get("tape_thread");
   assert.ok(threadTool);
 
-  await threadTool.execute("call-1", { action: "create", name: "demo" });
+  await threadTool.execute("call-1", { action: "root", summary: "root" });
 
-  assert.deepEqual(createdAnchors[0], {
-    id: "anchor-1",
-    name: "thread/demo",
-    type: "thread",
-    meta: { summary: "demo", purpose: "thread", trigger: "manual" },
-  });
+  assert.equal(createdAnchors[0]?.id, "anchor-1");
+  assert.match(createdAnchors[0]?.name ?? "", /^thread\/demo-\d{6}-\[root-node\]$/);
+  assert.equal(createdAnchors[0]?.type, "thread");
+  assert.deepEqual(createdAnchors[0]?.meta, { summary: "root", trigger: "manual" });
 });
 
 test("TapeThread non-mutating actions do not consume manual trigger", async () => {
@@ -102,10 +106,10 @@ test("TapeThread non-mutating actions do not consume manual trigger", async () =
   await threadTool.execute("call-2", { action: "search" });
   await threadTool.execute("call-3", { action: "resume" });
   await threadTool.execute("call-4", { action: "checkout", nodeId: "node-id" });
-  await threadTool.execute("call-5", { action: "create", name: "demo" });
+  await threadTool.execute("call-5", { action: "root", summary: "root" });
 
   assert.equal(createdAnchors.length, 1);
-  assert.deepEqual((createdAnchors[0] as any).meta, { summary: "demo", purpose: "thread", trigger: "manual" });
+  assert.deepEqual((createdAnchors[0] as any).meta, { summary: "root", trigger: "manual" });
 });
 
 test("TapeThread mutation actions are blocked in manual mode without slash command", async () => {
@@ -117,6 +121,7 @@ test("TapeThread mutation actions are blocked in manual mode without slash comma
     { action: "create", name: "demo" },
     { action: "root", summary: "root" },
     { action: "branch", branchName: "next" },
+    { action: "node", summary: "next node" },
     { action: "update", summary: "updated" },
     { action: "archive" },
   ]) {
