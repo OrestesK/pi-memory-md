@@ -2,10 +2,6 @@
 
 The npm release may lag behind the GitHub version. To get the latest updates, install from GitHub: `pi install git:github.com/VandeeFeng/pi-memory-md`
 
-## [Unreleased]
-
-我居然直到现在才发现之前几个 release 里的标题级别是错误的。。。
-
 到目前为止，差不多把我计划投入给这个项目的 token 都用完了，想实现的核心功能差不多也完成了。
 
 最开始使用 pi 不是因为 OpenClaw 的爆火，也不是因为 star 的数量，在那个时候 pi 的 star 才刚刚开始。而是我急需一个可以自己扩展的 CLI agent 来学习和构建自己的 agent。机缘巧合下，了解并安装了 pi，当时就觉得这个名字挺符合我的喜好，很容易让人感觉和联想到一种数学美感，我说实话比 codex 和 Claude Code 要好，它们的中心落在了 code 上。在终端里第一次运行，it just works（完全能满足我基础的编程学习需求）！
@@ -23,6 +19,12 @@ The npm release may lag behind the GitHub version. To get the latest updates, in
 希望下一个 commit 是在 phi 里完成。
 
 See you!
+
+## [Unreleased]
+
+### Fixed
+
+- [#10](https://github.com/VandeeFeng/pi-memory-md/issues/10): `isMemoryInitialized()` only checks for core folder existence
 
 ## [0.1.38] - 2026-05-25
 

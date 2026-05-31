@@ -244,7 +244,7 @@ export function getMemoryUserDir(memoryDir: string): string {
 }
 
 export function isMemoryInitialized(memoryDir: string): boolean {
-  return fs.existsSync(getMemoryUserDir(memoryDir));
+  return fs.existsSync(getMemoryCoreDir(memoryDir));
 }
 
 export async function getMemoryMeta(settings: MemoryMdSettings, cwd: string): Promise<MemoryMeta> {
