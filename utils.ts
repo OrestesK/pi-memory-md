@@ -67,15 +67,16 @@ export function resolveFrom(root: string, filePath: string): string {
   return path.isAbsolute(filePath) ? filePath : path.resolve(root, filePath);
 }
 
-function normalizePathForComparison(filePath: string): string {
+export function normalizePathForComparison(filePath: string): string {
   const resolvedPath = path.resolve(filePath);
-  return process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
+  const normalized = process.platform === "win32" ? resolvedPath.replace(/\\/g, "/") : resolvedPath;
+  return normalized.toLowerCase();
 }
 
 export function isPathInside(parentDir: string, targetPath: string): boolean {
   const normalizedParent = normalizePathForComparison(parentDir);
   const normalizedTarget = normalizePathForComparison(targetPath);
-  return normalizedTarget === normalizedParent || normalizedTarget.startsWith(`${normalizedParent}${path.sep}`);
+  return normalizedTarget === normalizedParent || normalizedTarget.startsWith(`${normalizedParent}/`);
 }
 
 export function resolvePathWithin(baseDir: string, relPath: string): string | null {

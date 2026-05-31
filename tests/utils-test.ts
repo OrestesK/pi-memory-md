@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
-import { getProjectMeta } from "../utils.js";
+import { getProjectMeta, isPathInside, normalizePathForComparison } from "../utils.js";
 import { createTempDir } from "./test-helpers.js";
 
 function createGitRepo(repoPath: string): void {
@@ -22,6 +22,66 @@ function createWorktree(mainRepoPath: string, worktreePath: string, branch = "wo
     stdio: "ignore",
   });
 }
+
+describe("isPathInside", () => {
+  it("returns true when target equals parent", () => {
+    const parent = createTempDir("isPathInside-equal");
+    assert.ok(isPathInside(parent, parent));
+  });
+
+  it("returns true when target is nested under parent", () => {
+    const parent = createTempDir("isPathInside-nested");
+    const target = path.join(parent, "sub", "nested");
+    fs.mkdirSync(target, { recursive: true });
+    assert.ok(isPathInside(parent, target));
+  });
+
+  it("returns false when target is outside parent", () => {
+    const parent = createTempDir("isPathInside-outside");
+    const sibling = createTempDir("isPathInside-sibling");
+    fs.mkdirSync(sibling, { recursive: true });
+    assert.ok(!isPathInside(parent, sibling));
+  });
+
+  it("handles paths with or without trailing slash consistently", () => {
+    const parent = createTempDir("isPathInside-slash");
+    const target = path.join(parent, "file.txt");
+    fs.writeFileSync(target, "test");
+
+    const withSlash = parent.endsWith("/") ? parent : `${parent}/`;
+    assert.ok(isPathInside(withSlash, target));
+    assert.ok(isPathInside(parent, target));
+  });
+});
+
+describe("normalizePathForComparison", () => {
+  it("normalizes path separators and returns lowercase", () => {
+    const input = path.join("Users", "test", "project");
+    const normalized = normalizePathForComparison(input);
+    assert.equal(normalized, normalized.toLowerCase());
+    assert.ok(normalized.includes("users"));
+    assert.ok(normalized.includes("test"));
+    assert.ok(normalized.includes("project"));
+  });
+
+  it("produces consistent results for the same directory", () => {
+    const repoPath = createTempDir("utils-test-norm-repo");
+    createGitRepo(repoPath);
+
+    const normalized1 = normalizePathForComparison(repoPath);
+    const normalized2 = normalizePathForComparison(repoPath);
+    assert.equal(normalized1, normalized2);
+  });
+
+  it("produces same result for resolved and unresolved same path", () => {
+    const repoPath = createTempDir("utils-test-norm-resolve");
+    createGitRepo(repoPath);
+
+    const withSlash = repoPath.endsWith("/") ? repoPath : `${repoPath}/`;
+    const normalized = normalizePathForComparison(withSlash);
+    assert.equal(normalized, normalizePathForComparison(repoPath));
+  });
+});
 
 describe("getProjectMeta", () => {
   it("returns metadata for a regular repository", () => {

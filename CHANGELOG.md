@@ -24,6 +24,7 @@ See you!
 
 ### Fixed
 
+- [#9](https://github.com/VandeeFeng/pi-memory-md/issues/9): Windows: "not a git repo" error due to path separator mismatch (forward vs backslash)
 - [#10](https://github.com/VandeeFeng/pi-memory-md/issues/10): `isMemoryInitialized()` only checks for core folder existence
 
 ## [0.1.38] - 2026-05-25

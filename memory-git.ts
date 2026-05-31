@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { GitResult, MemoryMdSettings, SyncResult } from "./types.js";
-import { DEFAULT_LOCAL_PATH, formatCommitTimestamp, getProjectMeta } from "./utils.js";
+import { DEFAULT_LOCAL_PATH, formatCommitTimestamp, getProjectMeta, normalizePathForComparison } from "./utils.js";
 
 const TIMEOUT_MS = 10000;
 const FETCH_TTL_MS = 12 * 60 * 60 * 1000;
@@ -93,7 +93,10 @@ export async function syncRepository(pi: ExtensionAPI, settings: MemoryMdSetting
 
   if (fs.existsSync(localPath)) {
     const project = getProjectMeta(localPath);
-    if (project.gitRoot !== project.cwd) {
+    if (
+      project.gitRoot === null ||
+      normalizePathForComparison(project.gitRoot) !== normalizePathForComparison(project.cwd)
+    ) {
       return { success: false, message: `Directory exists but is not a git repo: ${localPath}` };
     }
 
@@ -155,7 +158,10 @@ export async function pushRepository(pi: ExtensionAPI, settings: MemoryMdSetting
   }
 
   const project = getProjectMeta(localPath);
-  if (project.gitRoot !== project.cwd) {
+  if (
+    project.gitRoot === null ||
+    normalizePathForComparison(project.gitRoot) !== normalizePathForComparison(project.cwd)
+  ) {
     return { success: false, message: `Git repository not initialized: ${localPath}` };
   }
 
