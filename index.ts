@@ -422,7 +422,12 @@ function notifyHookResults(
   const label = phase === "sessionStart" ? "start" : "end";
   for (const { action, result } of results) {
     if (result.success && !result.updated) continue;
-    ctx.ui.notify(`${result.message} (${label}/${action})`, result.level ?? (result.success ? "info" : "error"));
+
+    try {
+      ctx.ui.notify(`${result.message} (${label}/${action})`, result.level ?? (result.success ? "info" : "error"));
+    } catch (error) {
+      if (!(error instanceof Error && error.message.includes("extension ctx is stale"))) throw error;
+    }
   }
 }
 

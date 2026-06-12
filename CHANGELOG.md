@@ -24,6 +24,7 @@ See you!
 
 ### Fixed
 
+- Avoid uncaught stale extension context errors when async hook notifications finish after pi session replacement or reload.
 - [#9](https://github.com/VandeeFeng/pi-memory-md/issues/9): Windows: "not a git repo" error due to path separator mismatch (forward vs backslash)
 - [#10](https://github.com/VandeeFeng/pi-memory-md/issues/10): `isMemoryInitialized()` only checks for core folder existence
 
