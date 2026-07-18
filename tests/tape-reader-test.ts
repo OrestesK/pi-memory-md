@@ -114,6 +114,26 @@ test("getSessionFilePath reuses cached header lookups and invalidates on header 
   }
 });
 
+test("getSessionFilePath does not read the complete session file for its header", (t) => {
+  const cwd = createTempDir("pi-memory-md-tape-reader-bounded-header-cwd");
+  const agentDir = createTempDir("pi-memory-md-tape-reader-bounded-header-agent");
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+
+  try {
+    const encodedPath = `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+    const filePath = path.join(agentDir, "sessions", encodedPath, "session.jsonl");
+    writeSessionFile(filePath, "session-bounded", []);
+    t.mock.method(fs, "readFileSync", () => {
+      throw new Error("whole-file session read");
+    });
+
+    assert.equal(getSessionFilePath(cwd, "session-bounded"), filePath);
+  } finally {
+    process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  }
+});
+
 test("parseSessionFile reuses cached results until the file changes", () => {
   const tempDir = createTempDir("pi-memory-md-tape-reader-cache");
   const filePath = path.join(tempDir, "session.jsonl");
@@ -136,4 +156,44 @@ test("parseSessionFile reuses cached results until the file changes", () => {
   assert.ok(thirdParse);
   assert.notStrictEqual(thirdParse, firstParse);
   assert.equal(thirdParse.entries.length, 2);
+});
+
+test("parseSessionFile tail-parses oversized session files", () => {
+  const tempDir = createTempDir("pi-memory-md-tape-reader-oversized");
+  const filePath = path.join(tempDir, "huge-session.jsonl");
+  const oversizedEntry = createMessageEntry("e1", new Date().toISOString(), `oversized ${"x".repeat(5 * 1024 * 1024)}`);
+  const recentEntry = createMessageEntry("e2", new Date().toISOString(), "recent tail entry");
+  writeSessionFile(filePath, "session-1", [oversizedEntry, recentEntry]);
+
+  const parsed = parseSessionFile(filePath);
+
+  assert.ok(parsed);
+  assert.equal(parsed.header.id, "session-1");
+  assert.deepEqual(
+    parsed.entries.map((entry) => entry.id),
+    ["e2"],
+  );
+});
+
+test("parseSessionFile keeps the first complete tail line when an oversized tail starts on a newline", () => {
+  const tempDir = createTempDir("pi-memory-md-tape-reader-oversized-aligned");
+  const filePath = path.join(tempDir, "huge-session.jsonl");
+  const tailBytes = 512 * 1024;
+  const finalEntry = createMessageEntry("e3", "2026-04-23T10:02:00.000Z", "final tail entry");
+  const baseTailEntry = createMessageEntry("e2", "2026-04-23T10:01:00.000Z", "");
+  const baseTail = `${JSON.stringify(baseTailEntry)}\n${JSON.stringify(finalEntry)}\n`;
+  const paddingLength = tailBytes - Buffer.byteLength(baseTail);
+  assert.ok(paddingLength > 0);
+
+  const firstTailEntry = createMessageEntry("e2", "2026-04-23T10:01:00.000Z", "x".repeat(paddingLength));
+  const prefixEntry = createMessageEntry("e1", "2026-04-23T10:00:00.000Z", `prefix ${"x".repeat(3 * 1024 * 1024)}`);
+  writeSessionFile(filePath, "session-1", [prefixEntry, firstTailEntry, finalEntry]);
+
+  const parsed = parseSessionFile(filePath);
+
+  assert.ok(parsed);
+  assert.deepEqual(
+    parsed.entries.map((entry) => entry.id),
+    ["e2", "e3"],
+  );
 });

@@ -7,6 +7,17 @@ description: Create or update pi-memory-md memory files using the native write/e
 
 Use this skill to safely create or update pi-memory-md memory files while preserving valid frontmatter.
 
+## Eligibility and approval
+
+Before proposing a write:
+
+- Search existing memory and identify the recurring future question the record would answer.
+- Verify factual claims against current source, tests, configuration, explicit current user input, or another authoritative source.
+- Write only durable, reusable knowledge that is materially expensive to rediscover and is not already authoritative in `AGENTS.md`, source, or repository documentation.
+- Reject chronology, session summaries, raw logs, transient status, secrets, copied implementation prose, and one-off details recoverable from source or git.
+
+Substantial work alone does not justify a memory. A request to remember something authorizes a proposal, not the mutation: show the exact target and a concise content summary, then obtain explicit user confirmation before creating or updating a memory file.
+
 ## Workflow
 
 ### 1. Find the memory directory
@@ -17,7 +28,7 @@ Use [scripts/memory-write.sh](scripts/memory-write.sh) to resolve the project me
 
 ### 2. Create a new memory file
 
-Before creating a memory file, infer a proposed relative path, description, and tags from the user's request, then ask the user to confirm them unless they already provided these values explicitly.
+Before creating a memory file, infer a proposed relative path, description, and tags from the user's request, present them with a concise content summary, and ask for explicit final confirmation. User-provided path or metadata values are proposal inputs; they do not replace final write confirmation.
 
 Use [scripts/memory-write.sh](scripts/memory-write.sh) to create the file template. The script prints the created absolute file path. Read or edit that file next.
 

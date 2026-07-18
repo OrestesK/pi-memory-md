@@ -56,10 +56,30 @@ async function normalizeForBm25(text: string): Promise<string> {
   if (!HAN_REGEX.test(text)) return text;
 
   const jiebaCut = await getJiebaCut();
-  const rawTokens = jiebaCut?.(text, true) ?? fallbackChineseTokens(text);
+  let rawTokens: string[] | null = null;
+  try {
+    rawTokens = jiebaCut?.(text, true) ?? null;
+  } catch {
+    jiebaCutPromise = Promise.resolve(null);
+  }
+
+  rawTokens ??= fallbackChineseTokens(text);
   const tokens = rawTokens.map((token) => token.trim()).filter(Boolean);
   const encodedTokens = tokens.map((token) => `zh_${Buffer.from(token, "utf8").toString("hex")}`);
   return `${text} ${tokens.join(" ")} ${encodedTokens.join(" ")}`.trim();
+}
+
+function parseMemoryParts(raw: string): { tags: string; description: string; content: string } {
+  try {
+    const parsed = matter(raw);
+    return {
+      tags: Array.isArray(parsed.data.tags) ? parsed.data.tags.join(" ") : "",
+      description: typeof parsed.data.description === "string" ? parsed.data.description : "",
+      content: parsed.content,
+    };
+  } catch {
+    return { tags: "", description: "", content: raw };
+  }
 }
 
 export async function prepareBm25Docs<T>(
@@ -126,15 +146,15 @@ export async function bm25SearchMemoryFiles<Scope extends string>(
   for (const item of filePaths) {
     const raw = await fs.promises.readFile(item.filePath, "utf-8").catch(() => "");
     if (!raw) continue;
-    const parsed = matter(raw);
+    const parts = parseMemoryParts(raw);
     docs.push({
       id: item.filePath,
       path: item.filePath,
       scope: item.scope,
       title: await normalizeForBm25(path.basename(item.filePath, ".md")),
-      tags: await normalizeForBm25(Array.isArray(parsed.data.tags) ? parsed.data.tags.join(" ") : ""),
-      description: await normalizeForBm25(typeof parsed.data.description === "string" ? parsed.data.description : ""),
-      content: await normalizeForBm25(parsed.content),
+      tags: await normalizeForBm25(parts.tags),
+      description: await normalizeForBm25(parts.description),
+      content: await normalizeForBm25(parts.content),
     });
   }
 

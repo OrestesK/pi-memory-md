@@ -5,6 +5,9 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { expandHomePath, resolveFrom, toTimestamp } from "../utils.js";
 
 const DEFAULT_CACHE_SIZE = 100;
+const MAX_SESSION_HEADER_BYTES = 64 * 1024;
+const DEFAULT_MAX_SESSION_FILE_BYTES = 2 * 1024 * 1024;
+const DEFAULT_SESSION_TAIL_BYTES = 512 * 1024;
 
 interface FileStatCache<T> {
   mtimeMs: number;
@@ -87,6 +90,20 @@ function getDirectoryMtimeMs(dirPath: string): number | null {
   }
 }
 
+function readFirstLine(filePath: string, maxBytes = MAX_SESSION_HEADER_BYTES): string | null {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(maxBytes);
+    const bytesRead = fs.readSync(fd, buffer, 0, maxBytes, 0);
+    if (bytesRead === 0) return null;
+
+    const content = buffer.subarray(0, bytesRead).toString("utf-8");
+    return content.split("\n", 1)[0] || null;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function readSessionHeader(filePath: string): SessionHeader | null {
   try {
     const stat = fs.statSync(filePath);
@@ -96,8 +113,7 @@ function readSessionHeader(filePath: string): SessionHeader | null {
       return cached.value;
     }
 
-    const content = fs.readFileSync(filePath, "utf-8");
-    const firstLine = content.split("\n", 1)[0];
+    const firstLine = readFirstLine(filePath);
     if (!firstLine) {
       sessionHeaderCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: null });
       return null;
@@ -172,6 +188,33 @@ export function getSessionFilePath(cwd: string, sessionId: string): string | nul
   return null;
 }
 
+function readSessionEntryLines(filePath: string, stat: fs.Stats): string[] {
+  if (stat.size <= DEFAULT_MAX_SESSION_FILE_BYTES) {
+    const content = fs.readFileSync(filePath, "utf-8");
+    const lines = content.trim().split("\n");
+    return lines.slice(1);
+  }
+
+  const bytesToRead = Math.min(DEFAULT_SESSION_TAIL_BYTES, stat.size);
+  const start = stat.size - bytesToRead;
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(bytesToRead);
+    const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, start);
+    const lines = buffer.subarray(0, bytesRead).toString("utf-8").split("\n");
+    if (start > 0) {
+      const previousByte = Buffer.allocUnsafe(1);
+      fs.readSync(fd, previousByte, 0, 1, start - 1);
+      if (previousByte[0] !== 0x0a) {
+        lines.shift();
+      }
+    }
+    return lines;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 export function parseSessionFile(filePath: string): { header: SessionHeader; entries: SessionEntry[] } | null {
   try {
     const stat = fs.statSync(filePath);
@@ -181,23 +224,15 @@ export function parseSessionFile(filePath: string): { header: SessionHeader; ent
       return cached.value;
     }
 
-    const content = fs.readFileSync(filePath, "utf-8");
-    const lines = content.trim().split("\n");
-    if (lines.length === 0) {
-      sessionParseCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: null });
-      return null;
-    }
-
-    const header: SessionHeader = JSON.parse(lines[0]);
-    if (header.type !== "session") {
+    const header = readSessionHeader(filePath);
+    if (!header) {
       sessionParseCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value: null });
       return null;
     }
 
     const entries: SessionEntry[] = [];
 
-    for (let index = 1; index < lines.length; index++) {
-      const line = lines[index];
+    for (const line of readSessionEntryLines(filePath, stat)) {
       if (!line.trim()) continue;
 
       try {

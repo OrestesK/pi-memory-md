@@ -64,7 +64,7 @@
   ],
   "scripts": {
     "prepare": "node .husky/install.mjs",
-    "check": "biome check --write --error-on-warnings . && tsgo --noEmit",
+    "check": "biome check --error-on-warnings package.json *.ts tape/*.ts tests/*.ts && tsc --noEmit --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2022 --lib ES2022,DOM --strict index.ts hooks.ts memory-core.ts memory-git.ts tools.ts types.ts utils.ts bm25.ts tape/*.ts tests/*.ts",
     "test": "node --import tsx --test --test-concurrency=1 tests/*-test.ts",
     "test:file": "node --import tsx --test"
   },

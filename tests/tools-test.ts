@@ -1,10 +1,11 @@
 // Covers memory tool check/search behavior plus invalid-path handling.
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { writeMemoryFile } from "../memory-core.js";
-import { registerMemoryCheck, registerMemorySearch } from "../tools.js";
+import { registerMemoryCheck, registerMemorySearch, registerMemorySync } from "../tools.js";
 import { createTempDir } from "./test-helpers.js";
 
 type RegisteredTool = {
@@ -51,6 +52,26 @@ async function executeTool(pi: MockPi, name: string, params: Record<string, unkn
   assert.ok(tool, `Tool not registered: ${name}`);
   return tool.execute("tool-call-1", params, undefined, undefined, createToolContext(cwd));
 }
+
+test("memory_sync status works without creating a project memory namespace", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-sync-status");
+  const projectDir = path.join(tempDir, "project");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  fs.mkdirSync(projectDir, { recursive: true });
+  execFileSync("git", ["init", "-q", settings.localPath]);
+
+  const pi = createMockPi();
+  registerMemorySync(pi as never, settings);
+
+  const result = (await executeTool(pi, "memory_sync", { action: "status" }, projectDir)) as {
+    content: Array<{ text: string }>;
+    details: { dirty: boolean; initialized: boolean };
+  };
+
+  assert.equal(result.content[0]?.text, "No uncommitted changes");
+  assert.deepEqual(result.details, { initialized: true, dirty: false });
+  assert.equal(fs.existsSync(path.join(settings.localPath, path.basename(projectDir))), false);
+});
 
 test("memory_check supports directory filtering", async () => {
   const tempDir = createTempDir("pi-memory-md-tools-check-directory");
@@ -255,6 +276,55 @@ test("memory_search handles query, grep, rg, and empty results", async () => {
 
   assert.equal(emptyResult.details?.count, 0);
   assert.match(emptyResult.content[0]?.text ?? "", /No results found for "missing"/);
+});
+
+test("memory_search includes project memories outside core", async () => {
+  const tempDir = createTempDir("pi-memory-md-tools-search-project-root");
+  const projectDir = path.join(tempDir, "project");
+  const settings = { localPath: path.join(tempDir, "memory-root") };
+  const memoryDir = path.join(settings.localPath, path.basename(projectDir));
+
+  writeMemoryFile(path.join(memoryDir, "core", "project", "placeholder.md"), "# Placeholder", {
+    description: "Unrelated core memory",
+    tags: ["placeholder"],
+  });
+  const rootMemoryPath = path.join(memoryDir, "research", "recovery-runbook.md");
+  writeMemoryFile(rootMemoryPath, "# Recovery runbook", {
+    description: "Durable recovery procedure",
+    tags: ["recovery"],
+  });
+
+  const pi = createMockPi((command, args) => {
+    if (command === "grep" && args[5] === "recovery") {
+      assert.equal(args.at(-1), memoryDir);
+      return { stdout: `${rootMemoryPath}:5:# Recovery runbook\n` };
+    }
+    if (command === "rg" && args[4] === "recovery") {
+      assert.equal(args.at(-1), memoryDir);
+      return { stdout: `${rootMemoryPath}:5:# Recovery runbook\n` };
+    }
+    return { stdout: "" };
+  });
+  registerMemorySearch(pi as never, settings);
+
+  const queryResult = (await executeTool(pi, "memory_search", { query: "durable recovery procedure" }, projectDir)) as {
+    content: Array<{ text?: string }>;
+    details?: { files?: string[]; count?: number; scope?: string };
+  };
+  const grepResult = (await executeTool(pi, "memory_search", { grep: "recovery" }, projectDir)) as {
+    details?: { files?: string[]; count?: number };
+  };
+  const rgResult = (await executeTool(pi, "memory_search", { rg: "recovery" }, projectDir)) as {
+    details?: { files?: string[]; count?: number };
+  };
+
+  assert.equal(queryResult.details?.scope, "project");
+  assert.equal(queryResult.details?.count, 1);
+  assert.deepEqual(queryResult.details?.files, ["research/recovery-runbook.md"]);
+  assert.equal(grepResult.details?.count, 1);
+  assert.deepEqual(grepResult.details?.files, ["research/recovery-runbook.md"]);
+  assert.equal(rgResult.details?.count, 1);
+  assert.deepEqual(rgResult.details?.files, ["research/recovery-runbook.md"]);
 });
 
 test("memory_search BM25 ranks English and Chinese queries", async () => {

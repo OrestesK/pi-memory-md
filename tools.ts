@@ -6,7 +6,6 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { bm25SearchMemoryFiles } from "./bm25.js";
 import {
-  getMemoryCoreDir,
   getMemoryMeta,
   // initializeMemoryDirectory, // unused after memory-init moved to SKILL
   listMemoryFilesAsync,
@@ -151,7 +150,7 @@ export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings)
       }),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
       const { action } = params as { action: "pull" | "push" | "status" };
       if (!settings.localPath) {
         return {
@@ -161,11 +160,9 @@ export function registerMemorySync(pi: ExtensionAPI, settings: MemoryMdSettings)
       }
 
       const localPath = settings.localPath;
-      const memoryMeta = await getMemoryMeta(settings, ctx.cwd);
       if (action === "status") {
         const memoryRepo = getProjectMeta(localPath);
-        const initialized = memoryMeta.initialized && memoryRepo.gitRoot === memoryRepo.cwd;
-        if (!initialized) {
+        if (memoryRepo.gitRoot !== memoryRepo.cwd) {
           return {
             content: [{ type: "text", text: "Memory repository not initialized. Use memory_init to set up." }],
             details: { initialized: false },
@@ -429,8 +426,8 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         (scope === "global" || scope === "all")
           ? [{ label: "global", memoryDir: memoryMeta.global.dir }]
           : []),
-      ].map((root) => ({ ...root, coreDir: getMemoryCoreDir(root.memoryDir) }));
-      const existingRoots = searchRoots.filter((root) => fs.existsSync(root.coreDir));
+      ];
+      const existingRoots = searchRoots.filter((root) => fs.existsSync(root.memoryDir));
       const sections: string[] = [];
       const matchedFiles = new Map<string, string>();
 
@@ -467,7 +464,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
       if (query) {
         const bm25Sources: Array<{ filePath: string; scope: "project" | "global" }> = [];
         for (const root of existingRoots) {
-          const files = await listMemoryFilesAsync(root.coreDir);
+          const files = await listMemoryFilesAsync(root.memoryDir);
           for (const filePath of files) {
             bm25Sources.push({ filePath, scope: root.label as "project" | "global" });
           }
@@ -515,13 +512,13 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         return results;
       }
 
-      for (const { label, memoryDir, coreDir } of existingRoots) {
+      for (const { label, memoryDir } of existingRoots) {
         const sectionPrefix = scope === "all" ? `${label} ` : "";
 
         if (escapedQuery) {
           const tagResults = await runTool(
             "grep",
-            ["-rn", "--include=*.md", "-m", String(MAX_SEARCH_RESULTS), "-E", `^\\s*-\\s*${escapedQuery}`, coreDir],
+            ["-rn", "--include=*.md", "-m", String(MAX_SEARCH_RESULTS), "-E", `^\\s*-\\s*${escapedQuery}`, memoryDir],
             memoryDir,
             label,
           );
@@ -538,7 +535,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
               String(MAX_SEARCH_RESULTS),
               "-E",
               `^description:\\s*.*${escapedQuery}`,
-              coreDir,
+              memoryDir,
             ],
             memoryDir,
             label,
@@ -551,7 +548,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         if (grep) {
           const grepResults = await runTool(
             "grep",
-            ["-rn", "--include=*.md", "-m", String(MAX_SEARCH_RESULTS), "-E", grep, coreDir],
+            ["-rn", "--include=*.md", "-m", String(MAX_SEARCH_RESULTS), "-E", grep, memoryDir],
             memoryDir,
             label,
           );
@@ -563,7 +560,7 @@ export function registerMemorySearch(pi: ExtensionAPI, settings: MemoryMdSetting
         if (rg) {
           const rgResults = await runTool(
             "rg",
-            ["-t", "md", "-m", String(MAX_SEARCH_RESULTS), rg, coreDir],
+            ["-t", "md", "-m", String(MAX_SEARCH_RESULTS), rg, memoryDir],
             memoryDir,
             label,
           );
