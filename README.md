@@ -132,9 +132,9 @@ To disable packaged `pi-memory-md` skills, configure the package skills filter. 
 
 ## Memory Delivery Modes
 
-The extension supports two base modes for delivering memory into the conversation.
-When tape mode is disabled, behavior is exactly as described below.
-When tape mode is enabled, the same delivery mode still applies, but tape changes how memory files are selected.
+The extension supports two delivery modes for durable Memory and Tape context.
+When `enabled` is `true`, durable Memory behaves as described below.
+When `enabled` is `false`, durable Memory context, tools, commands, and sync hooks are inactive; Tape can still run independently when `tape.enabled` is `true`. Tape-only context excludes files under the durable Memory directory and may include recently active project files plus session-bridge context.
 
 ### 1. Message Append (Default)
 
@@ -172,9 +172,9 @@ When tape mode is enabled, the same delivery mode still applies, but tape change
 ## Hooks
 
 - `sessionStart: ["pull"]`: sync from upstream, fresh fetch/pull evidence within 12 hours skips another fetch.
-  This avoids repeated network checks on every new session while still refreshing upstream periodically.
-- `sessionEnd: ["push"]`: commit and push memory when the session ends.
-- `beforeAgentStart: ["sessionBridge"]`: bridge prompt-relevant context from recent `new`/`resume`/`fork` previous sessions.
+  This avoids repeated network checks on every new session while still refreshing upstream periodically. Ignored when durable Memory is disabled.
+- `sessionEnd: ["push"]`: commit and push memory when the session ends. Ignored when durable Memory is disabled.
+- `beforeAgentStart: ["sessionBridge"]`: bridge prompt-relevant context from recent `new`/`resume`/`fork` previous sessions; remains available to Tape-only mode.
 
 More trigger actions will be added later, even custom hooks.
 
@@ -212,7 +212,7 @@ More trigger actions will be added later, even custom hooks.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `enabled` | `true` | Enable extension |
+| `enabled` | `true` | Enable durable Memory context, tools, commands, and sync hooks; Tape is controlled independently by `tape.enabled` |
 | `memoryDir.repoUrl` | Required | Git repository URL |
 | `memoryDir.localPath` | `~/.pi/memory-md` | Local memory clone path |
 | `memoryDir.globalMemory` | disabled | Shared memory folder name (relative to `localPath`), enabled only when explicitly configured |
@@ -310,17 +310,17 @@ If you want to jump to the conversation around an anchor and restart from there,
 
 ### Tape vs Delivery Modes
 
-**Tape** is an independent feature that can be enabled alongside either delivery mode.
-It does not change the delivery mechanism; it changes **which memory files** are selected.
+**Tape** is independent of durable Memory and can use either delivery mode.
 
-| Tape | Delivery mode | Behavior |
-|------|----------------|----------|
-| Disabled | `message-append` | Sends memory once as a hidden custom message on the first agent turn |
-| Disabled | `system-prompt` | Rebuilds memory and appends it to the system prompt on every agent turn |
-| Enabled | `message-append` | Sends tape-selected memory once as a hidden custom message on the first agent turn |
-| Enabled | `system-prompt` | Rebuilds tape-selected memory and appends it to the system prompt on every agent turn |
+| Durable Memory | Tape | Delivery mode | Behavior |
+|----------------|------|---------------|----------|
+| Enabled | Disabled | `message-append` | Sends Memory once as a hidden custom message on the first agent turn |
+| Enabled | Disabled | `system-prompt` | Rebuilds Memory and appends it to the system prompt on every agent turn |
+| Enabled | Enabled | either | Delivers Tape-selected Memory/project context through the configured delivery mode |
+| Disabled | Enabled | either | Delivers Tape-selected project context and session bridge without scanning or injecting durable Memory files |
+| Disabled | Disabled | either | Delivers neither Memory nor Tape context |
 
-With tape enabled, the delivered content is still a memory index/summary for the model, but the file list is chosen by tape-aware selection logic instead of the basic project scan. In smart mode, the delivered list can also include recently active project file paths inferred from tool usage, plus a `recent focus` summary for each selected file showing the most recently attended `read` / `edit` ranges inside the same effective smart-scan window. Stale paths from old tape history are ignored when the file no longer exists.
+With Tape enabled, smart selection can include recently active project file paths inferred from tool usage, plus a `recent focus` summary showing recently attended `read` / `edit` ranges inside the same effective smart-scan window. When durable Memory is enabled, Tape may also select Memory files. When it is disabled, `recent-only`, smart fallback/ranking, and relative or absolute whitelist entries cannot inject files from the Memory directory. Stale paths from old Tape history are ignored when the file no longer exists.
 
 A delivered tape hidden message looks like:
 

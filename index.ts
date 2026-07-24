@@ -119,6 +119,7 @@ function ensureTapeRuntime(
       selector: new MemoryFileSelector(service, memoryDir, ctx.cwd, {
         whitelist: settings.tape?.context?.whitelist,
         blacklist: settings.tape?.context?.blacklist,
+        includeMemoryFiles: settings.enabled,
       }),
       cacheKey: runtimeKey,
     };
@@ -204,20 +205,26 @@ function initDeliveryContent(
   ctx: ExtensionContext,
   options: { runSessionStartHooks: boolean },
 ): boolean {
-  if (!settings.enabled) return false;
+  const tapeEnabled = settings.tape?.enabled === true;
+  if (!settings.enabled && !tapeEnabled) return false;
 
   const memoryDir = getMemoryDir(settings, ctx.cwd);
-  const memoryExists = fs.existsSync(getMemoryCoreDir(memoryDir));
+  const memoryExists = settings.enabled && fs.existsSync(getMemoryCoreDir(memoryDir));
 
   state.hasDeliveredInitialContext = false;
   state.initialMemoryContext = { status: "pending" };
   state.initialTapeContext = { status: "pending" };
 
-  if (!memoryExists && !settings.tape?.enabled) {
+  if (!memoryExists && !tapeEnabled) {
     return false;
   }
 
-  if (options.runSessionStartHooks && settings.localPath && getHookActions(settings, "sessionStart").length > 0) {
+  if (
+    settings.enabled &&
+    options.runSessionStartHooks &&
+    settings.localPath &&
+    getHookActions(settings, "sessionStart").length > 0
+  ) {
     state.sessionStartHookPromise = runHookTriggerWithNotify(pi, settings, ctx, "sessionStart");
   } else {
     state.sessionStartHookPromise = null;
@@ -346,28 +353,23 @@ function deliverStartupContext(
 
   if (tapeState.tapeActive && shouldDeliverInitialContext) {
     const tapeContext = getReadyContext(state.initialTapeContext);
-    if (!tapeContext || tapeContext.content.trim().length === 0) {
-      if (mode === "message-append") {
-        state.hasDeliveredInitialContext = true;
+    if (tapeContext && tapeContext.content.trim().length > 0) {
+      const { content, fileCount } = tapeContext;
+      ctx.ui.notify(`Tape mode: ${fileCount} context files delivered (${mode})`, "info");
+
+      if (mode === "system-prompt") {
+        return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
       }
-      return undefined;
+
+      state.hasDeliveredInitialContext = true;
+      return {
+        message: {
+          customType: "pi-memory-md-tape",
+          content: appendSessionBridge(content, sessionBridgeContext),
+          display: false,
+        },
+      };
     }
-
-    const { content, fileCount } = tapeContext;
-    ctx.ui.notify(`Tape mode: ${fileCount} memory files delivered (${mode})`, "info");
-
-    if (mode === "system-prompt") {
-      return { systemPrompt: `${event.systemPrompt}\n\n${content}` };
-    }
-
-    state.hasDeliveredInitialContext = true;
-    return {
-      message: {
-        customType: "pi-memory-md-tape",
-        content: appendSessionBridge(content, sessionBridgeContext),
-        display: false,
-      },
-    };
   }
 
   if (tapeState.tapeEnabled && !tapeState.tapeActive) return undefined;
@@ -505,7 +507,7 @@ function registerLifecycleHandlers(pi: ExtensionAPI, settings: MemoryMdSettings,
     state.activeTapeRuntime = null;
     activeTapeRuntime?.service.detachSessionTree();
 
-    if (getHookActions(settings, "sessionEnd").length === 0 || !settings.localPath) {
+    if (!settings.enabled || getHookActions(settings, "sessionEnd").length === 0 || !settings.localPath) {
       return;
     }
 
@@ -581,78 +583,79 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   //   },
   // });
 
-  pi.registerCommand("memory-refresh", {
-    description: "Refresh memory context from files",
-    handler: async (_args, ctx) => {
-      await cacheInitialContext(settings, state, ctx);
+  if (settings.enabled) {
+    pi.registerCommand("memory-refresh", {
+      description: "Refresh memory context from files",
+      handler: async (_args, ctx) => {
+        await cacheInitialContext(settings, state, ctx);
 
-      const memoryContext = getReadyContext(state.initialMemoryContext);
-      if (!memoryContext) {
-        ctx.ui.notify("No memory files found to refresh", "warning");
-        return;
-      }
+        const memoryContext = getReadyContext(state.initialMemoryContext);
+        if (!memoryContext) {
+          ctx.ui.notify("No memory files found to refresh", "warning");
+          return;
+        }
 
-      state.hasDeliveredInitialContext = false;
+        state.hasDeliveredInitialContext = false;
 
-      const mode = settings.delivery ?? settings.injection ?? "message-append";
+        const mode = settings.delivery ?? settings.injection ?? "message-append";
+        const { content, fileCount } = memoryContext;
 
-      const { content, fileCount } = memoryContext;
+        if (mode === "message-append") {
+          pi.sendMessage({
+            customType: "pi-memory-md-refresh",
+            content,
+            display: false,
+          });
+          ctx.ui.notify(`Memory refreshed: ${fileCount} files delivered (${mode})`, "info");
+          return;
+        }
 
-      if (mode === "message-append") {
-        pi.sendMessage({
-          customType: "pi-memory-md-refresh",
-          content,
-          display: false,
-        });
-        ctx.ui.notify(`Memory refreshed: ${fileCount} files delivered (${mode})`, "info");
-        return;
-      }
+        ctx.ui.notify(`Memory cache refreshed: ${fileCount} files (will be delivered on next prompt)`, "info");
+      },
+    });
 
-      ctx.ui.notify(`Memory cache refreshed: ${fileCount} files (will be delivered on next prompt)`, "info");
-    },
-  });
+    pi.registerCommand("memory-check", {
+      description: "Check memory repository status and folder structure",
+      handler: async (args, ctx) => {
+        const info = await getMemoryMeta(settings, ctx.cwd);
 
-  pi.registerCommand("memory-check", {
-    description: "Check memory repository status and folder structure",
-    handler: async (args, ctx) => {
-      const info = await getMemoryMeta(settings, ctx.cwd);
+        if (!info.initialized) {
+          ctx.ui.notify(
+            `Memory: ${info.name} | Repo: Not initialized | Use /memory-init to set up | Path: ${info.memoryPath}`,
+            "info",
+          );
+          return;
+        }
 
-      if (!info.initialized) {
+        const statusResult = settings.localPath
+          ? await gitExec(pi, settings.localPath, ["status", "--porcelain"])
+          : { stdout: "", success: false };
+        const isDirty = statusResult.stdout.trim().length > 0;
+        const repoStatus = settings.localPath ? (isDirty ? "Uncommitted changes" : "Clean") : "Not configured";
         ctx.ui.notify(
-          `Memory: ${info.name} | Repo: Not initialized | Use /memory-init to set up | Path: ${info.memoryPath}`,
-          "info",
+          `Memory: ${info.name} | Repo: ${repoStatus} | Files: ${info.project.fileCount ?? 0} | Path: ${info.memoryPath}`,
+          isDirty ? "warning" : "info",
         );
-        return;
-      }
 
-      const statusResult = settings.localPath
-        ? await gitExec(pi, settings.localPath, ["status", "--porcelain"])
-        : { stdout: "", success: false };
-      const isDirty = statusResult.stdout.trim().length > 0;
-      const repoStatus = settings.localPath ? (isDirty ? "Uncommitted changes" : "Clean") : "Not configured";
-      ctx.ui.notify(
-        `Memory: ${info.name} | Repo: ${repoStatus} | Files: ${info.project.fileCount ?? 0} | Path: ${info.memoryPath}`,
-        isDirty ? "warning" : "info",
-      );
+        const tokens = args.trim().split(/\s+/).filter(Boolean);
+        const requestedTreeLines = tokens
+          .map((token) => Number.parseInt(token, 10))
+          .find((value) => Number.isFinite(value));
+        const maxTreeLines = requestedTreeLines && requestedTreeLines > 0 ? requestedTreeLines : 25;
+        const scope = tokens.some((token) => token === "-g" || token === "--global" || token === "global")
+          ? "global"
+          : "project";
+        const memoryScope = scope === "global" ? info.global : info.project;
 
-      const tokens = args.trim().split(/\s+/).filter(Boolean);
-      const requestedTreeLines = tokens
-        .map((token) => Number.parseInt(token, 10))
-        .find((value) => Number.isFinite(value));
-      const maxTreeLines = requestedTreeLines && requestedTreeLines > 0 ? requestedTreeLines : 25;
-      const scope = tokens.some((token) => token === "-g" || token === "--global" || token === "global")
-        ? "global"
-        : "project";
-      const memoryScope = scope === "global" ? info.global : info.project;
+        if (!memoryScope.dir || !memoryScope.exists) {
+          ctx.ui.notify(`Memory ${scope} directory is not configured or does not exist.`, "warning");
+          return;
+        }
 
-      if (!memoryScope.dir || !memoryScope.exists) {
-        ctx.ui.notify(`Memory ${scope} directory is not configured or does not exist.`, "warning");
-        return;
-      }
-
-      ctx.ui.notify(renderMemoryTree(memoryScope.dir, maxTreeLines), "info");
-    },
-  });
+        ctx.ui.notify(renderMemoryTree(memoryScope.dir, maxTreeLines), "info");
+      },
+    });
+  }
 
   if (settings.tape?.enabled) {
     pi.registerCommand("memory-review", {
@@ -735,12 +738,14 @@ function registerMemoryCommands(pi: ExtensionAPI, settings: MemoryMdSettings, st
   }
 }
 
-// Registers memory tools, lifecycle handlers, and commands.
+// Registers lifecycle handlers, enabled Memory tools, and Memory/Tape commands.
 export default function memoryMdExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
   const state = createExtensionState();
 
   registerLifecycleHandlers(pi, settings, state);
-  registerAllMemoryTools(pi, settings);
+  if (settings.enabled) {
+    registerAllMemoryTools(pi, settings);
+  }
   registerMemoryCommands(pi, settings, state);
 }

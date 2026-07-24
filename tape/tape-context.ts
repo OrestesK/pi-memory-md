@@ -238,6 +238,7 @@ export class MemoryFileSelector {
   private readonly whitelist: string[];
   private readonly blacklist: string[];
   private readonly isWorktree: boolean;
+  private readonly includeMemoryFiles: boolean;
   private lastSelectionScanHours: number | null = null;
   private lastSmartLineRanges = new Map<string, LineRange[]>();
 
@@ -245,11 +246,12 @@ export class MemoryFileSelector {
     private tapeService: TapeService,
     private memoryDir: string,
     private projectRoot: string,
-    options?: { whitelist?: string[]; blacklist?: string[] },
+    options?: { whitelist?: string[]; blacklist?: string[]; includeMemoryFiles?: boolean },
   ) {
     this.whitelist = [...new Set(options?.whitelist ?? [])];
     this.blacklist = [...new Set(options?.blacklist ?? [])];
     this.isWorktree = getProjectMeta(projectRoot).isWorktree;
+    this.includeMemoryFiles = options?.includeMemoryFiles !== false;
   }
 
   async selectFilesForContext(
@@ -270,7 +272,9 @@ export class MemoryFileSelector {
     const selectedPaths = await this.filterDeliverablePathsAsync(filePaths);
     const selectedPathSet = new Set(selectedPaths.map((filePath) => path.resolve(this.toAbsolutePath(filePath))));
     const whitelistedPaths = (await this.resolveListedPathsAsync(this.whitelist)).filter(
-      (filePath) => !selectedPathSet.has(path.resolve(filePath)),
+      (filePath) =>
+        (this.includeMemoryFiles || this.toMemoryRelativePath(filePath) === null) &&
+        !selectedPathSet.has(path.resolve(filePath)),
     );
 
     return [...whitelistedPaths, ...selectedPaths];
@@ -496,7 +500,7 @@ export class MemoryFileSelector {
 
   private resolveTrackedPath(toolName: SupportedPathToolName, entryPath: string): string | null {
     if (toolName === "memory_write") {
-      return entryPath;
+      return this.includeMemoryFiles ? entryPath : null;
     }
 
     if (toolName === "read" || toolName === "edit" || toolName === "write") {
@@ -521,9 +525,11 @@ export class MemoryFileSelector {
       : new Set<string>();
 
     return existingPaths.filter((filePath) => {
+      const isMemoryPath = this.toMemoryRelativePath(filePath) !== null;
+      if (isMemoryPath && !this.includeMemoryFiles) return false;
       if (this.matchesListedPath(filePath, this.blacklist)) return false;
       if (this.matchesListedPath(filePath, this.whitelist)) return true;
-      if (this.toMemoryRelativePath(filePath)) return true;
+      if (isMemoryPath) return true;
       if (matchesDefaultIgnoredPath(filePath, this.projectRoot)) return false;
       if (!isPathInside(this.projectRoot, this.toAbsolutePath(filePath))) return true;
       return ripgrepVisiblePaths?.has(path.resolve(this.toAbsolutePath(filePath))) ?? true;
@@ -616,6 +622,8 @@ export class MemoryFileSelector {
   }
 
   private async scanMemoryDirectoryAsync(limit: number): Promise<string[]> {
+    if (!this.includeMemoryFiles) return [];
+
     const coreDir = path.join(this.memoryDir, "core");
 
     try {
